@@ -1,0 +1,141 @@
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+  --toolbar: #f6f8fa; --accent: #0969da; --code-bg: #f6f8fa; --quote: #656d76;
+  --fmt-bg: #faf6f4; --fmt-fg: #5f5a57;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --border: #30363d;
+    --toolbar: #161b22; --accent: #4493f8; --code-bg: #161b22; --quote: #8d96a0;
+    --fmt-bg: #1b1b1d; --fmt-fg: #b4b0ad;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+}
+
+#toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  background: var(--toolbar); border-bottom: 1px solid var(--border);
+}
+#toolbar button {
+  font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 12px; cursor: pointer;
+}
+#toolbar button:hover { border-color: var(--accent); }
+#tabs {
+  display: flex; align-items: stretch; overflow-x: auto; background: var(--toolbar);
+  border-bottom: 1px solid var(--border);
+}
+#tabs .tab {
+  display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 6px 8px 6px 12px;
+  border-right: 1px solid var(--border); border-bottom: 2px solid transparent;
+  color: var(--muted); cursor: pointer; white-space: nowrap; user-select: none;
+}
+#tabs .tab:hover { color: var(--fg); }
+#tabs .tab.active { background: var(--bg); color: var(--fg); border-bottom-color: var(--accent); }
+#tabs .tab .name { overflow: hidden; text-overflow: ellipsis; }
+#tabs .tab .dot { color: var(--accent); }
+#tabs .tab .x, #tabs .plus {
+  border: 0; background: transparent; color: inherit; font: inherit; line-height: 1;
+  width: 22px; height: 22px; border-radius: 4px; cursor: pointer; padding: 0;
+}
+#tabs .tab .x:hover, #tabs .plus:hover { background: rgba(127,127,127,.25); }
+#tabs .plus { align-self: center; margin: 0 6px; font-size: 18px; color: var(--muted); }
+.spacer { flex: 1; }
+.seg { display: flex; }
+.seg button { border-radius: 0 !important; margin-left: -1px; }
+.seg button:first-child { border-radius: 6px 0 0 6px !important; margin-left: 0; }
+.seg button:last-child { border-radius: 0 6px 6px 0 !important; }
+body.mode-read .seg [data-mode="read"],
+body.mode-split .seg [data-mode="split"],
+body.mode-edit .seg [data-mode="edit"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+#panes { flex: 1; display: flex; min-height: 0; }
+#editor-pane, #preview-pane { flex: 1 1 0; min-width: 0; overflow: auto; }
+#editor-pane { border-right: 1px solid var(--border); }
+body.mode-read #editor-pane, body.mode-edit #editor-pane { display: none; }
+body.mode-read #format-bar { display: none; }
+#preview:focus { outline: none; }
+#preview[contenteditable="true"] { caret-color: var(--accent); min-height: 100%; }
+
+/* Formatting bar */
+#format-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 14px;
+  background: var(--fmt-bg); border-bottom: 1px solid var(--border);
+}
+#format-bar button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 32px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--fmt-fg); font: 600 15px "Segoe UI", system-ui, sans-serif; cursor: pointer;
+}
+#format-bar button:hover { background: rgba(127,127,127,.18); }
+#format-bar button.active { background: rgba(127,127,127,.28); color: var(--fg); }
+#format-bar button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#format-bar button sub { font-size: 10px; }
+#format-bar .gap { width: 16px; }
+
+dialog { border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 16px; min-width: 340px; }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog label { display: block; margin-bottom: 6px; font-weight: 600; }
+dialog input[type=text] {
+  width: 100%; margin-bottom: 8px; padding: 6px 8px; font: inherit;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px;
+}
+.dlg-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.dlg-buttons button { font: inherit; padding: 4px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--toolbar); color: var(--fg); cursor: pointer; }
+#dlg-ok { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+#editor {
+  display: block; width: 100%; height: 100%; resize: none; border: 0; outline: 0;
+  padding: 16px 20px; background: var(--bg); color: var(--fg);
+  font: 13.5px/1.6 Consolas, "Cascadia Mono", monospace; tab-size: 2;
+}
+#preview-pane { padding: 0; }
+#preview { max-width: 860px; margin: 0 auto; padding: 24px 32px 80px; }
+
+#status {
+  display: flex; justify-content: space-between; padding: 3px 12px; font-size: 12px;
+  color: var(--muted); background: var(--toolbar); border-top: 1px solid var(--border);
+}
+
+/* Markdown body */
+.markdown-body { line-height: 1.6; word-wrap: break-word; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 1.4em 0 .6em; line-height: 1.25; font-weight: 600; }
+.markdown-body h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-body h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body table,
+.markdown-body pre, .markdown-body blockquote { margin: 0 0 16px; }
+.markdown-body a { color: var(--accent); text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body ul, .markdown-body ol { padding-left: 2em; }
+.markdown-body li + li { margin-top: .25em; }
+.markdown-body li.task-list-item, .markdown-body li:has(> input[type=checkbox]) { list-style: none; }
+.markdown-body li > input[type=checkbox] { margin: 0 .5em 0 -1.4em; }
+.markdown-body img { max-width: 100%; }
+.markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+.markdown-body blockquote { padding: 0 1em; color: var(--quote); border-left: .25em solid var(--border); }
+.markdown-body code {
+  font: 85% Consolas, "Cascadia Mono", monospace; background: var(--code-bg);
+  padding: .2em .4em; border-radius: 6px;
+}
+.markdown-body pre { padding: 16px; overflow: auto; background: var(--code-bg); border-radius: 6px; }
+.markdown-body pre code { padding: 0; background: transparent; font-size: 13px; }
+.markdown-body pre code.hljs { background: transparent; padding: 0; }
+.markdown-body table { border-collapse: collapse; display: block; overflow: auto; }
+.markdown-body th, .markdown-body td { padding: 6px 13px; border: 1px solid var(--border); }
+.markdown-body th { font-weight: 600; background: var(--code-bg); }
+
+@media print {
+  #toolbar, #tabs, #format-bar, #status, #editor-pane { display: none !important; }
+  #preview-pane { display: block !important; overflow: visible; }
+  body { background: #fff; color: #000; display: block; }
+  #preview { max-width: none; padding: 0; }
+}

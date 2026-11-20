@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' file: data: https: http:; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src file: https:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown Viewer</title>
+  <link rel="stylesheet" href="vendor/hljs-light.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="vendor/hljs-dark.css" media="(prefers-color-scheme: dark)">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="mode-read">
+  <header id="toolbar">
+    <button id="btn-open" title="Open (Ctrl+O)">Open</button>
+    <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+    <span class="spacer"></span>
+    <div class="seg" role="group" aria-label="View mode">
+      <button data-mode="read" title="Read-only (Ctrl+1)">Read</button>
+      <button data-mode="edit" title="Edit in the page (Ctrl+2)">Edit</button>
+      <button data-mode="split" title="Markdown source + edit (Ctrl+3)">Split</button>
+    </div>
+  </header>
+  <div id="tabs" role="tablist"></div>
+  <nav id="format-bar" aria-label="Formatting"></nav>
+  <main id="panes">
+    <section id="editor-pane">
+      <textarea id="editor" spellcheck="false" placeholder="Markdown source…"></textarea>
+    </section>
+    <section id="preview-pane">
+      <article id="preview" class="markdown-body" spellcheck="true"></article>
+    </section>
+  </main>
+  <footer id="status"><span id="stats"></span><span id="saved"></span></footer>
+
+  <dialog id="dlg">
+    <form method="dialog" id="dlg-form">
+      <label id="dlg-label" for="dlg-input"></label>
+      <input id="dlg-input" type="text" autocomplete="off">
+      <input id="dlg-input2" type="text" autocomplete="off">
+      <div class="dlg-buttons">
+        <button type="button" id="dlg-cancel">Cancel</button>
+        <button type="submit" id="dlg-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="vendor/marked.js"></script>
+  <script src="vendor/purify.js"></script>
+  <script src="vendor/highlight.js"></script>
+  <script src="vendor/turndown.js"></script>
+  <script src="vendor/turndown-gfm.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "markdown-viewer",
+  "productName": "Markdown Viewer",
+  "version": "1.0.0",
+  "description": "Simple local Markdown viewer and editor",
+  "main": "main.js",
+  "scripts": {
+    "postinstall": "node scripts/vendor.js",
+    "start": "electron .",
+    "vendor": "node scripts/vendor.js",
+    "icon": "node scripts/make-icon.js",
+    "package": "node scripts/package.js"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "@highlightjs/cdn-assets": "^11.11.1",
+    "dompurify": "^3.2.6",
+    "electron": "^39.0.0",
+    "marked": "^16.0.0",
+    "turndown": "^7.2.5",
+    "turndown-plugin-gfm": "^1.0.2"
+  }
+}

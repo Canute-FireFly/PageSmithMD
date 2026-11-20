@@ -1,6 +1,6 @@
 {
-  "name": "markdown-viewer",
-  "productName": "Markdown Viewer",
+  "name": "pagesmithmd",
+  "productName": "PageSmithMD",
   "version": "1.0.0",
   "description": "Simple local Markdown viewer and editor",
   "main": "main.js",

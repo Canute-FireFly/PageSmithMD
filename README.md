@@ -1,8 +1,12 @@
-# Markdown Viewer
+# PageSmithMD
 
-Small Electron app: view and edit Markdown files locally. Preview / Split / Editor modes,
-GitHub-style rendering, code highlighting, tables, task lists, relative images and links,
-light/dark follows Windows, PDF export, drag and drop, multiple windows.
+Small Electron app for Windows: view and edit Markdown files locally.
+
+- Tabs: every file opens in a new tab in the same window
+- Modes: Read (read-only), Edit (type on the rendered page, Word-style) and Split (Markdown source + editable page)
+- Formatting toolbar: bold, italic, strikethrough, code, headings, lists, task list, quote, link, image, code block, table, rule, undo
+- GitHub-style rendering, code highlighting, relative images and links, light/dark follows Windows
+- PDF export, drag and drop, keeps a file's line endings
 
 ## Run from source
     npm install
@@ -12,12 +16,12 @@ light/dark follows Windows, PDF export, drag and drop, multiple windows.
     npm run package
     powershell -ExecutionPolicy Bypass -File install.ps1
 
-Installs to `%LOCALAPPDATA%\Programs\Markdown Viewer`, adds Start menu and Desktop shortcuts and
+Installs to `%LOCALAPPDATA%\Programs\PageSmithMD`, adds Start menu and Desktop shortcuts and
 registers .md/.markdown/.mdown/.mkd. Windows 11 won't let an app make itself the default, so do
-once: right-click a .md file > Open with > Choose another app > Markdown Viewer > Always.
+once: right-click a .md file > Open with > Choose another app > PageSmithMD > Always.
 
 Remove with `uninstall.ps1`.
 
 ## Shortcuts
-Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save as, Ctrl+N new window, Ctrl+1/2/3 modes,
-Ctrl+B / Ctrl+I bold / italic in the editor, Ctrl+P print.
+Ctrl+O open, Ctrl+N new tab, Ctrl+W close tab, Ctrl+Tab next tab, Ctrl+S save, Ctrl+Shift+S save as,
+Ctrl+1/2/3 Read/Edit/Split, Ctrl+B / Ctrl+I / Ctrl+K bold / italic / link, Ctrl+P print.

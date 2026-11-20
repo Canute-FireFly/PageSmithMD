@@ -1,4 +1,4 @@
-// Builds the portable Windows app into dist/Markdown Viewer-win32-x64
+// Builds the portable Windows app into dist/PageSmithMD-win32-x64
 const { execFileSync } = require('child_process');
 const path = require('path');
 const { packager } = require('@electron/packager');
@@ -9,7 +9,7 @@ execFileSync(process.execPath, [path.join(__dirname, 'make-icon.js')], { stdio: 
 
 packager({
   dir: root,
-  name: 'Markdown Viewer',
+  name: 'PageSmithMD',
   platform: 'win32',
   arch: 'x64',
   out: path.join(root, 'dist'),

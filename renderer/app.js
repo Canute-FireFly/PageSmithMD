@@ -62,7 +62,7 @@
 
   function updateTitle() {
     const dirty = active ? isDirty(active) : false;
-    document.title = `${dirty ? '● ' : ''}${active ? nameOf(active) : 'Untitled'} - Markdown Viewer`;
+    document.title = `${dirty ? '● ' : ''}${active ? nameOf(active) : 'Untitled'} - PageSmithMD`;
     window.api.setDirty(tabs.some(isDirty));
     $('saved').textContent = dirty ? 'Unsaved changes' : '';
     renderTabs();

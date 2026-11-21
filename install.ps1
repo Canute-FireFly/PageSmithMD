@@ -5,7 +5,7 @@
 # Run:  powershell -ExecutionPolicy Bypass -File install.ps1
 $ErrorActionPreference = 'Stop'
 
-$src = Join-Path $PSScriptRoot 'dist\PageSmithMD-win32-x64'
+$src = Join-Path $PSScriptRoot 'release\PageSmithMD-win32-x64'
 if (-not (Test-Path (Join-Path $src 'PageSmithMD.exe'))) {
     throw "Build not found. Run 'npm run package' first."
 }

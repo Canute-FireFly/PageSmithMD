@@ -2,3 +2,4 @@ node_modules/
 dist/
 renderer/vendor/
 build/icon.png
+release/

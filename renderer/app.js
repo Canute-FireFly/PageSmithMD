@@ -379,7 +379,7 @@
     '|',
     ['undo', 'Undo (Ctrl+Z)', svg('<path d="M4 8v5h5"/><path d="M5 13a8 8 0 1 1 2.500 5.800"/>')],
   ];
-  const bar = $('format-bar');
+  const bar = $('fmt-tools');
   for (const it of items) {
     if (it === '|') { const g = document.createElement('span'); g.className = 'gap'; bar.appendChild(g); continue; }
     const [id, title, html] = it;
@@ -551,8 +551,6 @@
     }
   });
 
-  $('btn-open').addEventListener('click', () => window.api.openDialog());
-  $('btn-save').addEventListener('click', () => save(false));
   document.querySelectorAll('.seg button').forEach((b) =>
     b.addEventListener('click', () => setMode(b.dataset.mode)));
 

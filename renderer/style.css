@@ -18,15 +18,6 @@ body {
   font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
 }
 
-#toolbar {
-  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-  background: var(--toolbar); border-bottom: 1px solid var(--border);
-}
-#toolbar button {
-  font: inherit; color: var(--fg); background: var(--bg);
-  border: 1px solid var(--border); border-radius: 6px; padding: 3px 12px; cursor: pointer;
-}
-#toolbar button:hover { border-color: var(--accent); }
 #tabs {
   display: flex; align-items: stretch; overflow-x: auto; background: var(--toolbar);
   border-bottom: 1px solid var(--border);
@@ -46,20 +37,12 @@ body {
 }
 #tabs .tab .x:hover, #tabs .plus:hover { background: rgba(127,127,127,.25); }
 #tabs .plus { align-self: center; margin: 0 6px; font-size: 18px; color: var(--muted); }
-.spacer { flex: 1; }
-.seg { display: flex; }
-.seg button { border-radius: 0 !important; margin-left: -1px; }
-.seg button:first-child { border-radius: 6px 0 0 6px !important; margin-left: 0; }
-.seg button:last-child { border-radius: 0 6px 6px 0 !important; }
-body.mode-read .seg [data-mode="read"],
-body.mode-split .seg [data-mode="split"],
-body.mode-edit .seg [data-mode="edit"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 #panes { flex: 1; display: flex; min-height: 0; }
 #editor-pane, #preview-pane { flex: 1 1 0; min-width: 0; overflow: auto; }
 #editor-pane { border-right: 1px solid var(--border); }
 body.mode-read #editor-pane, body.mode-edit #editor-pane { display: none; }
-body.mode-read #format-bar { display: none; }
+body.mode-read #fmt-tools { display: none; }
 #preview:focus { outline: none; }
 #preview[contenteditable="true"] { caret-color: var(--accent); min-height: 100%; }
 
@@ -68,6 +51,20 @@ body.mode-read #format-bar { display: none; }
   display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 14px;
   background: var(--fmt-bg); border-bottom: 1px solid var(--border);
 }
+#fmt-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+
+/* Read / Edit toggle, pinned to the right of the bar */
+#format-bar .seg { display: flex; margin-left: auto; }
+#format-bar .seg button {
+  width: auto; height: 28px; padding: 0 14px; font: 500 13px "Segoe UI", system-ui, sans-serif;
+  border: 1px solid var(--border); border-radius: 0; margin-left: -1px; background: var(--bg); color: var(--fg);
+}
+#format-bar .seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+#format-bar .seg button:last-child { border-radius: 0 6px 6px 0; }
+body.mode-read .seg [data-mode="read"],
+body.mode-edit .seg [data-mode="edit"],
+body.mode-split .seg [data-mode="edit"] { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+
 #format-bar button {
   display: inline-flex; align-items: center; justify-content: center;
   width: 34px; height: 32px; padding: 0; border: 0; border-radius: 6px;
@@ -134,7 +131,7 @@ dialog input[type=text] {
 .markdown-body th { font-weight: 600; background: var(--code-bg); }
 
 @media print {
-  #toolbar, #tabs, #format-bar, #status, #editor-pane { display: none !important; }
+  #tabs, #format-bar, #status, #editor-pane { display: none !important; }
   #preview-pane { display: block !important; overflow: visible; }
   body { background: #fff; color: #000; display: block; }
   #preview { max-width: none; padding: 0; }

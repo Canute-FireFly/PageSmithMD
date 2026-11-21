@@ -11,18 +11,14 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="mode-read">
-  <header id="toolbar">
-    <button id="btn-open" title="Open (Ctrl+O)">Open</button>
-    <button id="btn-save" title="Save (Ctrl+S)">Save</button>
-    <span class="spacer"></span>
-    <div class="seg" role="group" aria-label="View mode">
-      <button data-mode="read" title="Read-only (Ctrl+1)">Read</button>
-      <button data-mode="edit" title="Edit in the page (Ctrl+2)">Edit</button>
-      <button data-mode="split" title="Markdown source + edit (Ctrl+3)">Split</button>
-    </div>
-  </header>
   <div id="tabs" role="tablist"></div>
-  <nav id="format-bar" aria-label="Formatting"></nav>
+  <nav id="format-bar" aria-label="Formatting">
+    <div id="fmt-tools"></div>
+    <div class="seg" role="group" aria-label="Read or edit">
+      <button type="button" data-mode="read" title="Read-only (Ctrl+1)">Read</button>
+      <button type="button" data-mode="edit" title="Edit in the page (Ctrl+2). Split view: View menu (Ctrl+3)">Edit</button>
+    </div>
+  </nav>
   <main id="panes">
     <section id="editor-pane">
       <textarea id="editor" spellcheck="false" placeholder="Markdown source…"></textarea>

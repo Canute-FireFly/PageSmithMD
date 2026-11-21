@@ -1,4 +1,4 @@
-// Builds the portable Windows app into dist/PageSmithMD-win32-x64
+// Builds the portable Windows app into release/PageSmithMD-win32-x64
 const { execFileSync } = require('child_process');
 const path = require('path');
 const { packager } = require('@electron/packager');
@@ -12,9 +12,9 @@ packager({
   name: 'PageSmithMD',
   platform: 'win32',
   arch: 'x64',
-  out: path.join(root, 'dist'),
+  out: path.join(root, 'release'),
   overwrite: true,
   prune: true,
   icon: path.join(root, 'build', 'icon.ico'),
-  ignore: [/^\/dist/, /^\/scripts/, /^\/build\/icon\.png/, /^\/\.git/, /^\/README/],
+  ignore: [/^\/dist/, /^\/release/,/^\/scripts/, /^\/build\/icon\.png/, /^\/\.git/, /^\/README/],
 }).then((paths) => console.log('Built:', paths.join('\n')));

@@ -471,14 +471,60 @@ ipcMain.on('close-now', (e) => {
   winOf(e)?.close();
 });
 
-ipcMain.on('open-link', (e, { href, base }) => {
+// Links in documents. Documents can come from anyone, so a link must never start a program:
+// - web and mail links open in the browser / mail app;
+// - Markdown (and .txt) files open in a tab;
+// - pictures, PDFs, office documents, audio and video open in their usual program after the user
+//   confirms; folders open in Explorer after confirming;
+// - anything else (programs, scripts, shortcuts, installers, web pages...) is refused.
+const SAFE_TO_OPEN = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tif', 'tiff', 'heic',
+  'pdf', 'rtf', 'csv', 'tsv', 'log', 'json', 'xml', 'yaml', 'yml',
+  'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'vsdx', 'pub', 'one',
+  'mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'wma', 'mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm', 'wmv',
+  'zip', '7z', 'rar',
+]);
+ipcMain.on('open-link', async (e, { href, base }) => {
   if (/^(https?|mailto):/i.test(href)) return shell.openExternal(href);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !/^[a-z]:[\\/]/i.test(href)) return; // other schemes (file:, ms-..., etc.)
   const dir = base ? path.dirname(base) : process.cwd();
-  const clean = decodeURIComponent(href.split('#')[0].split('?')[0]);
+  let clean;
+  try { clean = decodeURIComponent(href.split('#')[0].split('?')[0]); } catch (_) { return; }
+  if (!clean) return;
   const target = path.resolve(dir, clean);
-  if (!fs.existsSync(target)) return;
-  if (MD_RE.test(target)) openPath(target, winOf(e));
-  else shell.openPath(target);
+  let st;
+  try { st = fs.statSync(target); } catch (_) { return; }
+  const win = winOf(e);
+  if (st.isFile() && MD_RE.test(target)) return openPath(target, win);
+
+  const name = path.basename(target);
+  const ext = path.extname(target).slice(1).toLowerCase();
+  if (st.isFile() && !SAFE_TO_OPEN.has(ext)) {
+    dialog.showMessageBox(win, {
+      type: 'warning',
+      title: 'PageSmithMD',
+      message: `PageSmithMD won't open “${name}” from a link.`,
+      detail: 'For your safety, links in documents can only open Markdown files, pictures, PDFs, ' +
+        'office documents, audio and video. Programs, scripts and other kinds of file are never ' +
+        'started from a link.\n\nIf you trust this file, open it yourself from File Explorer.\n\n' + target,
+      buttons: ['OK', 'Show in folder'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    }).then((r) => { if (r.response === 1) shell.showItemInFolder(target); });
+    return;
+  }
+  const r = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: 'PageSmithMD',
+    message: st.isDirectory() ? `Open the folder “${name}”?` : `Open “${name}”?`,
+    detail: (st.isDirectory() ? 'It will open in File Explorer.' : `It will open in the program Windows uses for .${ext} files.`) + '\n\n' + target,
+    buttons: ['Open', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (r.response === 0) shell.openPath(target);
 });
 
 ipcMain.handle('export-pdf', async (e, filePath) => {

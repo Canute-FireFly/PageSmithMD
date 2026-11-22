@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an idea or an improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Please check the [existing issues](https://github.com/Canute-FireFly/PageSmithMD/issues) in case someone has asked already.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe what you're trying to achieve and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could PageSmithMD help?
+      description: Your idea for how it could work. Examples from other editors are welcome.
+  - type: textarea
+    id: markdown
+    attributes:
+      label: How should it be saved in the file?
+      description: If it changes what's written to the .md file, how would it look in plain Markdown, and on GitHub?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help?
+      options:
+        - label: I'd like to work on this myself

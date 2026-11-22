@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in PageSmithMD doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this! Please check the [existing issues](https://github.com/Canute-FireFly/PageSmithMD/issues) first.
+        **Security problem?** Please don't post it here; follow [SECURITY.md](https://github.com/Canute-FireFly/PageSmithMD/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What went wrong, and what did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The simplest way to make it happen. Attaching a small .md file that shows the problem helps a lot (drag it into this box).
+      placeholder: |
+        1. Open a file containing ...
+        2. Switch to Edit mode (Ctrl+2)
+        3. Type ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which mode were you in?
+      multiple: true
+      options:
+        - Read
+        - Edit
+        - Split
+        - Not sure / not relevant
+  - type: input
+    id: version
+    attributes:
+      label: PageSmithMD version
+      description: Help > About
+      placeholder: "0.9.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Setup installer
+        - Portable zip
+        - Built from source
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, error messages, or whether it happens every time.

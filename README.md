@@ -13,6 +13,8 @@ Small Electron app for Windows: view and edit Markdown files locally.
 - Paste images: paste a screenshot (Ctrl+V) or drop an image file while editing; it is saved in an `images` folder next to the document and linked with a relative path (a new document is saved first)
 - Table tools: with the cursor in a table (Edit/Split), a small bar adds or deletes rows and columns, aligns a column (saved as :--- / :---: / ---:) or deletes the table; Tab / Shift+Tab move between cells (Tab in the last cell adds a row), Enter moves down a row
 - Find and replace (Ctrl+F / Ctrl+H): highlights every match, match case and whole word options, Enter / Shift+Enter or F3 to step; replacing keeps formatting and works in Edit and Split mode
+- Auto-save (File > Auto-save, on by default): a named file is saved about 2 seconds after you stop typing, and when you switch tab or window; if another program changed the file on disk, auto-save pauses for it until you press Ctrl+S
+- Recovery: unsaved changes (including Untitled documents) are copied to `%APPDATA%\PageSmithMD\recovery` as you work; if PageSmithMD or Windows closes unexpectedly, the next start offers to restore them. A normal exit clears the copies
 - Reopen last session: the files you had open come back next time, in the same mode (File > Reopen last session on start)
 - Menu bar: drawn by the app in a larger font that follows the theme (Alt, Alt+F/E/V and arrow keys work as usual)
 - Theme: follow Windows, Light or Dark (status bar button or View > Theme), remembered between runs

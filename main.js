@@ -13,7 +13,7 @@ if (!app.requestSingleInstanceLock()) {
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const MAX_RECENT = 12;
 // session = the tabs open when the app last closed: [{ path, mode }], plus which one was active
-const defaults = { theme: 'system', sidebarOpen: true, recent: [], reopenSession: true, session: [], sessionActive: null, mdShortcuts: true };
+const defaults = { theme: 'system', sidebarOpen: true, recent: [], reopenSession: true, session: [], sessionActive: null, mdShortcuts: true, autoSave: true };
 let settings = { ...defaults };
 try {
   settings = { ...defaults, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
@@ -57,7 +57,7 @@ function filesFromArgv(argv) {
 
 function readFile(p, { recent = true, quiet = false } = {}) {
   try {
-    const f = { path: p, content: fs.readFileSync(p, 'utf8') };
+    const f = { path: p, content: fs.readFileSync(p, 'utf8'), mtime: fs.statSync(p).mtimeMs };
     if (recent) addRecent(p);
     return f;
   } catch (e) {
@@ -93,7 +93,7 @@ function saveSessionSoon() {
   sessionTimer = setTimeout(saveSettings, 400);
 }
 
-function createWindow(filePaths = [], restore = false) {
+function createWindow(filePaths = [], restore = false, recovered = []) {
   const win = new BrowserWindow({
     width: 1200,
     height: 820,
@@ -109,7 +109,7 @@ function createWindow(filePaths = [], restore = false) {
     },
   });
   const id = win.webContents.id;
-  state.set(id, { dirty: false, force: false, initial: initialFiles(filePaths, restore) });
+  state.set(id, { dirty: false, force: false, initial: { ...initialFiles(filePaths, restore), recovered } });
   win.setMenuBarVisibility(false); // the page draws a larger menu bar; shortcuts still go through the menu
   win.once('ready-to-show', () => win.show());
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -179,6 +179,14 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => send('close-tab') },
         { type: 'separator' },
+        {
+          label: 'Auto-save', type: 'checkbox', checked: settings.autoSave,
+          click: (item) => {
+            settings.autoSave = item.checked;
+            saveSettings();
+            BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('cmd', item.checked ? 'autosave-on' : 'autosave-off'));
+          },
+        },
         {
           label: 'Reopen last session on start', type: 'checkbox', checked: settings.reopenSession,
           click: (item) => { settings.reopenSession = item.checked; saveSettings(); },
@@ -309,10 +317,79 @@ ipcMain.handle('save', async (e, { content, saveAs, filePath }) => {
     return null;
   }
   addRecent(target);
-  return target;
+  return { path: target, mtime: mtimeOf(target) };
 });
 
-ipcMain.handle('get-settings', () => ({ theme: settings.theme, sidebarOpen: settings.sidebarOpen, recent: existingRecent(), mdShortcuts: settings.mdShortcuts }));
+const mtimeOf = (p) => { try { return fs.statSync(p).mtimeMs; } catch (_) { return null; } };
+
+// Auto-save: writes only if the file on disk is still the one we loaded / last saved.
+// If another program changed (or removed) it, nothing is written and the page is told.
+ipcMain.handle('autosave', (_e, { filePath, content, mtime }) => {
+  try {
+    const now = mtimeOf(filePath);
+    if (now == null || mtime == null || Math.abs(now - mtime) > 1) return { conflict: true };
+    fs.writeFileSync(filePath, content, 'utf8');
+    return { ok: true, mtime: mtimeOf(filePath) };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// ---- recovery copies of unsaved documents: %APPDATA%\PageSmithMD\recovery ----
+// Written by the page a moment after each change, removed once saved or on a normal exit.
+// Anything still there at the next start means the app didn't close normally.
+const RECOVERY_DIR = path.join(app.getPath('userData'), 'recovery');
+const keyOk = (k) => typeof k === 'string' && /^[\w-]{1,80}$/.test(k);
+ipcMain.on('recovery-write', (_e, { key, data }) => {
+  if (!keyOk(key)) return;
+  try {
+    fs.mkdirSync(RECOVERY_DIR, { recursive: true });
+    const f = path.join(RECOVERY_DIR, key + '.json');
+    fs.writeFileSync(f + '.tmp', JSON.stringify({ ...data, time: Date.now() }), 'utf8');
+    fs.renameSync(f + '.tmp', f);
+  } catch (err) { console.error('recovery write failed:', err.message); }
+});
+ipcMain.on('recovery-clear', (_e, key) => {
+  if (!keyOk(key)) return;
+  try { fs.unlinkSync(path.join(RECOVERY_DIR, key + '.json')); } catch (_) { /* already gone */ }
+});
+function clearRecovery() {
+  try { for (const f of fs.readdirSync(RECOVERY_DIR)) fs.unlinkSync(path.join(RECOVERY_DIR, f)); } catch (_) { /* none */ }
+}
+// Read what was left behind, ask whether to restore it, and remove the files either way
+function takeRecovery() {
+  let items = [];
+  try {
+    items = fs.readdirSync(RECOVERY_DIR).filter((f) => f.endsWith('.json')).map((f) => {
+      try { return JSON.parse(fs.readFileSync(path.join(RECOVERY_DIR, f), 'utf8')); } catch (_) { return null; }
+    }).filter((d) => d && typeof d.text === 'string');
+  } catch (_) { return []; }
+  clearRecovery();
+  if (!items.length) return [];
+  items.sort((a, b) => (a.time || 0) - (b.time || 0));
+  const names = items.map((d) => '  • ' + (d.path ? path.basename(d.path) : 'Untitled') +
+    (d.time ? '  (' + new Date(d.time).toLocaleString() + ')' : '')).join('\n');
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    buttons: ['Restore', 'Discard'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'PageSmithMD',
+    message: `PageSmithMD didn't close normally. Unsaved changes were kept for ${items.length} document${items.length > 1 ? 's' : ''}.`,
+    detail: names + '\n\nRestore opens them with the unsaved changes, ready to save.',
+  });
+  if (choice !== 0) return [];
+  // For a named file, also pass what is on disk now, so the tab shows as changed
+  return items.map((d) => {
+    const out = { path: d.path || null, text: d.text, eol: d.eol, bom: d.bom, mode: d.mode };
+    if (d.path) {
+      try { out.disk = fs.readFileSync(d.path, 'utf8'); out.mtime = mtimeOf(d.path); } catch (_) { out.disk = null; }
+    }
+    return out;
+  });
+}
+
+ipcMain.handle('get-settings', () => ({ theme: settings.theme, sidebarOpen: settings.sidebarOpen, recent: existingRecent(), mdShortcuts: settings.mdShortcuts, autoSave: settings.autoSave }));
 ipcMain.on('set-theme', (_e, t) => { if (['system', 'light', 'dark'].includes(t)) setTheme(t); });
 ipcMain.on('set-sidebar', (_e, open) => { settings.sidebarOpen = !!open; saveSettings(); });
 ipcMain.on('remove-recent', (_e, p) => {
@@ -409,9 +486,11 @@ app.on('second-instance', (_e, argv) => {
 app.whenReady().then(() => {
   nativeTheme.themeSource = settings.theme;
   buildMenu();
-  createWindow(filesFromArgv(process.argv), true);
+  createWindow(filesFromArgv(process.argv), true, takeRecovery());
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow([], true); });
 });
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => { if (sessionTimer) { clearTimeout(sessionTimer); saveSettings(); } });
+// A normal exit: you've already saved or chosen "Don't save", so the recovery copies aren't needed
+app.on('will-quit', clearRecovery);

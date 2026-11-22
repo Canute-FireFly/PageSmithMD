@@ -139,7 +139,10 @@
     const dirty = active ? isDirty(active) : false;
     document.title = `${dirty ? '● ' : ''}${active ? nameOf(active) : 'Untitled'} - PageSmithMD`;
     window.api.setDirty(tabs.some(isDirty));
-    $('saved').textContent = dirty ? 'Unsaved changes' : '';
+    $('saved').textContent = active && active.autoPaused
+      ? 'Changed on disk by another program: auto-save paused (Ctrl+S to overwrite)'
+      : dirty ? 'Unsaved changes' : '';
+    if (dirty) scheduleBackground();
     renderTabs();
     reportSession();
   }
@@ -1483,6 +1486,97 @@
     if (info && enterRule(info)) e.preventDefault();
   });
 
+  // ---------- auto-save and recovery ----------
+  // Auto-save: a named file is written ~2s after you stop typing, and when you switch tab or
+  // leave the window - but only if the file on disk is still the one we loaded or last saved.
+  // Recovery: every document with unsaved changes (named or not) is copied to the app's
+  // recovery folder shortly after each change; the copies go once saved or on a normal exit.
+  let autoSave = true;
+  const winKey = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const recKey = (t) => winKey + '-' + t.id;
+  let autoTimer = null;
+  let recTimer = null;
+  let savedFlash = null;
+
+  function fileContent(t, text) {
+    let out = text;
+    if (t.eol === '\r\n') out = out.replace(/\n/g, '\r\n');
+    if (t.bom) out = '\uFEFF' + out;
+    return out;
+  }
+
+  function scheduleBackground() {
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => autosaveAll(), 2000);
+    clearTimeout(recTimer);
+    recTimer = setTimeout(persistRecovery, 1200);
+  }
+
+  async function autosaveTab(t) {
+    if (!autoSave || !t || !t.path || t.autoPaused || t.saving) return;
+    if (t === active) syncFromRich();
+    if (!isDirty(t)) return;
+    const text = textOf(t);
+    t.saving = true;
+    let res;
+    try { res = await window.api.autosave(t.path, fileContent(t, text), t.mtime); } finally { t.saving = false; }
+    if (res && res.ok) {
+      t.saved = text;
+      t.mtime = res.mtime;
+      if (t === active) savedText = text;
+      updateTitle();
+      if (t === active && !isDirty(t)) {
+        $('saved').textContent = 'Auto-saved';
+        clearTimeout(savedFlash);
+        savedFlash = setTimeout(() => { if ($('saved').textContent === 'Auto-saved') $('saved').textContent = ''; }, 2000);
+      }
+      persistRecovery();
+    } else if (res && res.conflict) {
+      t.autoPaused = true;
+      updateTitle();
+    }
+  }
+  function autosaveAll() { for (const t of tabs) autosaveTab(t); }
+
+  function persistRecovery() {
+    clearTimeout(recTimer);
+    if (active && mode !== 'read') syncFromRich();
+    for (const t of tabs) {
+      const key = recKey(t);
+      if (isDirty(t)) {
+        const text = textOf(t);
+        if (t.recText === text) continue;
+        t.recText = text;
+        window.api.recoveryWrite(key, { path: t.path, text, eol: t.eol, bom: t.bom, mode: t === active ? mode : t.mode });
+      } else if (t.recText != null) {
+        t.recText = null;
+        window.api.recoveryClear(key);
+      }
+    }
+  }
+  function dropRecovery(t) {
+    if (t.recText != null) { t.recText = null; window.api.recoveryClear(recKey(t)); }
+  }
+
+  // Open documents kept from a session that didn't close normally (after the user said Restore)
+  function openRecovered(list) {
+    for (const r of list || []) {
+      if (r.path) openDoc({ path: r.path, content: r.disk == null ? '' : r.disk, mtime: r.mtime, mode: r.mode });
+      else openDoc(null);
+      const t = active;
+      if (r.eol) t.eol = r.eol;
+      if (r.bom != null) t.bom = r.bom;
+      editor.value = r.text.replace(/\r\n/g, '\n');
+      richPending = false;
+      render();
+      updateTitle();
+      t.restored = true;
+    }
+    if ((list || []).length) $('saved').textContent = 'Restored unsaved changes';
+  }
+
+  window.addEventListener('blur', () => { if (autoSave) autosaveAll(); persistRecovery(); });
+
   // ---------- modes / files ----------
   function setMode(m) {
     if (mode !== 'read') syncFromRich();
@@ -1511,7 +1605,9 @@
   }
 
   function activate(t) {
+    const prev = active;
     stash();
+    if (prev && prev !== t) autosaveTab(prev);
     active = t;
     filePath = t.path;
     savedText = t.saved;
@@ -1538,7 +1634,7 @@
     const eol = content.includes('\r\n') ? '\r\n' : '\n';
     content = content.replace(/\r\n/g, '\n');
     const t = {
-      id: nextId++, path: file ? file.path : null, eol, bom,
+      id: nextId++, path: file ? file.path : null, eol, bom, mtime: file ? file.mtime : null,
       saved: content, text: content,
       mode: file ? (file.mode || 'read') : 'edit', scroll: 0,
     };
@@ -1561,6 +1657,7 @@
     }
     const i = tabs.indexOf(t);
     tabs.splice(i, 1);
+    dropRecovery(t);
     if (!tabs.length) { active = null; openDoc(null); }
     else if (t === active) { active = null; activate(tabs[Math.min(i, tabs.length - 1)]); }
     else { renderTabs(); reportSession(); }
@@ -1588,14 +1685,18 @@
     let out = editor.value;
     if (active.eol === '\r\n') out = out.replace(/\n/g, '\r\n');
     if (active.bom) out = '﻿' + out;
-    const p = await window.api.save(out, !!saveAs, filePath);
-    if (!p) return false;
+    const res = await window.api.save(out, !!saveAs, filePath);
+    if (!res) return false;
+    const p = res.path;
+    active.mtime = res.mtime;
+    active.autoPaused = false;
     const changed = p !== filePath;
     filePath = p;
     savedText = editor.value;
     active.path = p;
     active.saved = savedText;
     updateTitle();
+    persistRecovery();
     if (changed) { const keep = previewPane.scrollTop; render(); previewPane.scrollTop = keep; }
     return true;
   }
@@ -1913,6 +2014,8 @@
       case 'export-pdf': syncFromRich(); return window.api.exportPdf(filePath);
       case 'print': return window.api.print();
       case 'toggle-sidebar': return setSidebar(!sidebarOpen());
+      case 'autosave-on': autoSave = true; autosaveAll(); return;
+      case 'autosave-off': autoSave = false; return;
       case 'md-shortcuts-on': mdShortcuts = true; return;
       case 'md-shortcuts-off': mdShortcuts = false; return;
       case 'find': return openFind(false);
@@ -1924,6 +2027,7 @@
     const st = await window.api.getSettings();
     showTheme(st.theme);
     mdShortcuts = st.mdShortcuts !== false;
+    autoSave = st.autoSave !== false;
     setSidebar(st.sidebarOpen, false);
     recent = st.recent;
     renderRecent();
@@ -1935,5 +2039,6 @@
     } else {
       openDoc(null); // a blank document opens ready to type in
     }
+    if (initial.recovered && initial.recovered.length) openRecovered(initial.recovered);
   })();
 })();

@@ -45,3 +45,8 @@ Theme, sidebar open/closed, the recent files list and the last session are saved
 ## Shortcuts
 Ctrl+O open, Ctrl+N new document, Ctrl+W close tab, Ctrl+Tab next tab, Ctrl+S save, Ctrl+Shift+S save as,
 Ctrl+1/2/3 Read/Edit/Split, Ctrl+B / Ctrl+I / Ctrl+K bold / italic / link, Ctrl+F find, Ctrl+H replace, Ctrl+Shift+H highlight, Ctrl+P print, Ctrl+Shift+L show/hide sidebar.
+
+## Licence
+PageSmithMD is free and open source under the [MIT licence](LICENSE). Copyright (c) 2026 John Moore.
+It includes open-source components under their own licences; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
+(also under Help > Licences in the app).

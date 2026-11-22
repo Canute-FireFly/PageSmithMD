@@ -1,8 +1,18 @@
 {
   "name": "pagesmithmd",
   "productName": "PageSmithMD",
-  "version": "1.0.0",
-  "description": "Simple local Markdown viewer and editor",
+  "version": "0.9.0",
+  "description": "A simple, free Markdown viewer and editor for Windows",
+  "author": "John Moore",
+  "license": "MIT",
+  "homepage": "https://github.com/Canute-FireFly/PageSmithMD",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Canute-FireFly/PageSmithMD.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Canute-FireFly/PageSmithMD/issues"
+  },
   "main": "main.js",
   "scripts": {
     "postinstall": "node scripts/vendor.js",

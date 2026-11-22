@@ -104,6 +104,7 @@ function createWindow(filePaths = [], restore = false, recovered = []) {
     icon: path.join(__dirname, 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      devTools: !app.isPackaged, // no developer tools in the installed app
       contextIsolation: true,
       sandbox: true,
     },
@@ -137,8 +138,38 @@ function createWindow(filePaths = [], restore = false, recovered = []) {
 }
 
 // Opens a file as a new tab in the given (or focused, or first) window
-function openPath(p, fromWin) {
-  const f = readFile(p);
+// ---- Help menu ----
+const REPO_URL = 'https://github.com/Canute-FireFly/PageSmithMD';
+
+// The third-party licences open as a (read-only) tab; not added to recent files
+function openLicences() {
+  const p = path.join(__dirname, 'THIRD-PARTY-NOTICES.md');
+  if (!fs.existsSync(p)) { shell.openExternal(REPO_URL + '/blob/main/THIRD-PARTY-NOTICES.md'); return; }
+  openPath(p, BrowserWindow.getFocusedWindow(), { recent: false });
+}
+
+async function showAbout() {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  const v = process.versions;
+  const r = await dialog.showMessageBox(win, {
+    type: 'info',
+    title: 'About PageSmithMD',
+    message: `PageSmithMD ${app.getVersion()}`,
+    detail: 'A simple, free Markdown viewer and editor for Windows.\n\n' +
+      'Copyright © 2026 John Moore\nReleased under the MIT licence; open-source components are listed under Help > Licences.\n\n' +
+      `Electron ${v.electron} · Chromium ${v.chrome} · Node ${v.node}\n` +
+      `Settings folder: ${app.getPath('userData')}`,
+    buttons: ['OK', 'GitHub page', 'Licences'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  if (r.response === 1) shell.openExternal(REPO_URL);
+  if (r.response === 2) openLicences();
+}
+
+function openPath(p, fromWin, opts) {
+  const f = readFile(p, opts);
   if (!f) return;
   const win = fromWin || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
   if (!win) { createWindow([p]); return; }
@@ -242,7 +273,19 @@ function buildMenu() {
         { role: 'zoomIn', accelerator: 'CmdOrCtrl+=' }, { role: 'zoomOut' }, { role: 'resetZoom' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
-        { role: 'toggleDevTools' },
+        // developer tools only when running from source, not in the installed app
+        ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }]),
+      ],
+    },
+    {
+      label: '&Help',
+      submenu: [
+        { label: 'PageSmithMD on GitHub', click: () => shell.openExternal(REPO_URL) },
+        { label: 'Report a problem…', click: () => shell.openExternal(REPO_URL + '/issues/new') },
+        { type: 'separator' },
+        { label: 'Licences', click: () => openLicences() },
+        { type: 'separator' },
+        { label: 'About PageSmithMD', click: () => showAbout() },
       ],
     },
   ];

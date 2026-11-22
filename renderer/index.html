@@ -19,6 +19,24 @@
       <button type="button" data-mode="edit" title="Edit in the page (Ctrl+2). Split view: View menu (Ctrl+3)">Edit</button>
     </div>
   </nav>
+  <div id="find-bar" hidden role="search">
+    <div class="find-row">
+      <input id="find-input" type="text" placeholder="Find" autocomplete="off" spellcheck="false" aria-label="Find">
+      <span id="find-count" aria-live="polite"></span>
+      <button type="button" id="find-case" class="toggle" title="Match case" aria-pressed="false">Aa</button>
+      <button type="button" id="find-word" class="toggle" title="Whole word" aria-pressed="false"><u>ab</u></button>
+      <button type="button" id="find-prev" title="Previous match (Shift+Enter)">&#8593;</button>
+      <button type="button" id="find-next" title="Next match (Enter)">&#8595;</button>
+      <button type="button" id="find-toggle-replace" title="Show replace (Ctrl+H)">Replace</button>
+      <button type="button" id="find-close" title="Close (Esc)">&times;</button>
+    </div>
+    <div class="find-row" id="replace-row" hidden>
+      <input id="replace-input" type="text" placeholder="Replace with" autocomplete="off" spellcheck="false" aria-label="Replace with">
+      <button type="button" id="replace-one" title="Replace this match (Enter)">Replace</button>
+      <button type="button" id="replace-all" title="Replace every match">Replace all</button>
+      <span id="replace-note"></span>
+    </div>
+  </div>
   <div id="workspace">
   <aside id="sidebar" aria-label="Sidebar">
     <section class="sb-section sb-outline">

@@ -136,6 +136,18 @@
     window.api.setDirty(tabs.some(isDirty));
     $('saved').textContent = dirty ? 'Unsaved changes' : '';
     renderTabs();
+    reportSession();
+  }
+
+  // Remember open (saved) files for "Reopen last session"; only sent when something changed
+  let sessionSig = '';
+  function reportSession() {
+    const list = tabs.filter((t) => t.path).map((t) => ({ path: t.path, mode: t === active ? mode : t.mode }));
+    const act = active && active.path ? active.path : null;
+    const sig = JSON.stringify([list, act]);
+    if (sig === sessionSig) return;
+    sessionSig = sig;
+    window.api.setSession(list, act);
   }
 
   function renderTabs() {
@@ -190,6 +202,7 @@
     if (isEditable() && !preview.firstChild) preview.innerHTML = '<p><br></p>';
     updateStats();
     buildOutline();
+    refreshFind();
   }
 
   // ---------- sidebar: outline ----------
@@ -313,6 +326,7 @@
     updateStats();
     updateTitle();
     buildOutline();
+    refreshFind();
   }
   function scheduleRichSync() {
     richPending = true;
@@ -321,7 +335,7 @@
     window.api.setDirty(true);
   }
 
-  preview.addEventListener('input', scheduleRichSync);
+  preview.addEventListener('input', () => { scheduleRichSync(); refreshFind(); });
   preview.addEventListener('change', scheduleRichSync); // checkboxes
   editor.addEventListener('input', () => {
     updateTitle();
@@ -691,6 +705,8 @@
     if (m !== 'read' && !preview.firstChild) preview.innerHTML = '<p><br></p>';
     if (m === 'edit') { lastTarget = 'rich'; preview.focus(); }
     if (m === 'split') editor.focus();
+    reportSession();
+    if (findOpen()) { updateReplaceState(); refreshFind(); }
   }
 
   // ---------- tabs ----------
@@ -734,7 +750,7 @@
     const t = {
       id: nextId++, path: file ? file.path : null, eol, bom,
       saved: content, text: content,
-      mode: file ? 'read' : 'edit', scroll: 0,
+      mode: file ? (file.mode || 'read') : 'edit', scroll: 0,
     };
     // A single blank, untouched tab is replaced rather than kept beside the new file
     if (file && tabs.length === 1 && !tabs[0].path && !isDirty(tabs[0]) && textOf(tabs[0]) === '') {
@@ -757,7 +773,7 @@
     tabs.splice(i, 1);
     if (!tabs.length) { active = null; openDoc(null); }
     else if (t === active) { active = null; activate(tabs[Math.min(i, tabs.length - 1)]); }
-    else renderTabs();
+    else { renderTabs(); reportSession(); }
     return true;
   }
 
@@ -843,6 +859,245 @@
     }
   });
 
+
+  // ---------- find and replace ----------
+  // Searches the rendered page (what you read). Matches are drawn with the CSS Custom Highlight API,
+  // so the document itself is never changed just by searching. Replacing edits the page text
+  // (keeping its formatting) and the Markdown follows, like any other edit on the page.
+  const findBar = $('find-bar');
+  const findInput = $('find-input');
+  const replaceInput = $('replace-input');
+  const replaceRow = $('replace-row');
+  let findMatches = [];
+  let findIndex = -1;
+  let findCase = false;
+  let findWord = false;
+  let findTimer = null;
+  const hasHighlights = typeof Highlight !== 'undefined' && CSS.highlights;
+
+  const findOpen = () => !findBar.hidden;
+
+  function openFind(withReplace) {
+    findBar.hidden = false;
+    if (withReplace) replaceRow.hidden = false;
+    $('find-toggle-replace').textContent = replaceRow.hidden ? 'Replace' : 'Hide replace';
+    const sel = document.activeElement === editor
+      ? editor.value.slice(editor.selectionStart, editor.selectionEnd)
+      : String(window.getSelection());
+    if (sel && !sel.includes('\n') && sel.length < 200) findInput.value = sel;
+    updateReplaceState();
+    runFind(true);
+    findInput.focus();
+    findInput.select();
+  }
+
+  function closeFind() {
+    findBar.hidden = true;
+    clearFindHighlights();
+    findMatches = [];
+    findIndex = -1;
+    if (mode === 'split' && lastTarget === 'src') editor.focus(); else preview.focus();
+  }
+
+  function clearFindHighlights() {
+    if (!hasHighlights) return;
+    CSS.highlights.delete('find-match');
+    CSS.highlights.delete('find-current');
+  }
+
+  // Text of the page as one string, with a map back to the text nodes. Blocks are kept apart
+  // so a match can't run from one paragraph into the next.
+  function pageText() {
+    const BLOCK = /^(P|LI|H[1-6]|PRE|TD|TH|BLOCKQUOTE|DIV|UL|OL|TABLE|TR)$/;
+    const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const parts = [];
+    let text = '';
+    let lastBlock = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      let b = n.parentElement;
+      while (b && b !== preview && !BLOCK.test(b.tagName)) b = b.parentElement;
+      if (lastBlock && b !== lastBlock) text += '\u0000';
+      lastBlock = b;
+      parts.push({ node: n, start: text.length });
+      text += n.nodeValue;
+    }
+    return { text, parts };
+  }
+
+  function posAt(parts, i, isEnd) {
+    // binary search for the text node holding offset i
+    let lo = 0, hi = parts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (parts[mid].start <= i - (isEnd ? 1 : 0)) lo = mid; else hi = mid - 1;
+    }
+    const p = parts[lo];
+    return { node: p.node, offset: i - p.start };
+  }
+
+  function findRegex() {
+    const q = findInput.value;
+    if (!q) return null;
+    let src = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (findWord) src = '(?<![\\p{L}\\p{N}_])' + src + '(?![\\p{L}\\p{N}_])';
+    return new RegExp(src, 'gu' + (findCase ? '' : 'i'));
+  }
+
+  // keepPlace: stay on the match nearest the old one (used while typing / after edits)
+  function runFind(fromTop) {
+    clearTimeout(findTimer);
+    const oldStart = findMatches[findIndex]?.start;
+    findMatches = [];
+    const re = findRegex();
+    if (re) {
+      const { text, parts } = pageText();
+      for (let m = re.exec(text); m; m = re.exec(text)) {
+        if (!m[0]) { re.lastIndex++; continue; }
+        const a = posAt(parts, m.index, false);
+        const b = posAt(parts, m.index + m[0].length, true);
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        range.setEnd(b.node, b.offset);
+        findMatches.push({ range, start: m.index });
+      }
+    }
+    if (!findMatches.length) findIndex = -1;
+    else if (fromTop || oldStart == null) {
+      // first match at or below the top of the visible page
+      const top = previewPane.getBoundingClientRect().top;
+      findIndex = findMatches.findIndex((m) => m.range.getBoundingClientRect().bottom >= top);
+      if (findIndex < 0) findIndex = 0;
+    } else {
+      findIndex = findMatches.findIndex((m) => m.start >= oldStart);
+      if (findIndex < 0) findIndex = findMatches.length - 1;
+    }
+    paintFind(fromTop);
+  }
+
+  function paintFind(scroll) {
+    clearFindHighlights();
+    const n = findMatches.length;
+    findInput.classList.toggle('no-match', !!findInput.value && !n);
+    $('find-count').textContent = !findInput.value ? '' : n ? `${findIndex + 1} of ${n}` : 'No results';
+    $('find-prev').disabled = $('find-next').disabled = !n;
+    updateReplaceState();
+    if (!n) return;
+    if (hasHighlights) {
+      CSS.highlights.set('find-match', new Highlight(...findMatches.map((m) => m.range)));
+      CSS.highlights.set('find-current', new Highlight(findMatches[findIndex].range));
+    }
+    if (scroll) scrollToMatch(findMatches[findIndex].range);
+  }
+
+  function scrollToMatch(range) {
+    const rc = range.getBoundingClientRect();
+    const pane = previewPane.getBoundingClientRect();
+    if (rc.top < pane.top + 40 || rc.bottom > pane.bottom - 40) {
+      previewPane.scrollTop += rc.top - pane.top - pane.height / 3;
+    }
+  }
+
+  function stepFind(dir) {
+    if (!findMatches.length) return;
+    findIndex = (findIndex + dir + findMatches.length) % findMatches.length;
+    paintFind(true);
+  }
+
+  function updateReplaceState() {
+    const can = isEditable();
+    const n = findMatches.length;
+    $('replace-one').disabled = !can || !n;
+    $('replace-all').disabled = !can || !n;
+    replaceInput.disabled = !can;
+    const note = $('replace-note');
+    if (!can) note.textContent = 'Switch to Edit (Ctrl+2) to replace';
+    else if (note.dataset.kind !== 'done') note.textContent = '';
+    note.dataset.kind = can ? note.dataset.kind || '' : 'read';
+  }
+  function replaceNote(text) {
+    const note = $('replace-note');
+    note.textContent = text;
+    note.dataset.kind = 'done';
+    clearTimeout(replaceNote.t);
+    replaceNote.t = setTimeout(() => { if (note.dataset.kind === 'done') { note.textContent = ''; note.dataset.kind = ''; } }, 4000);
+  }
+
+  // Put new text over a match. Uses insertText so Ctrl+Z can undo it.
+  function replaceRange(range, text) {
+    preview.focus();
+    const sl = window.getSelection();
+    sl.removeAllRanges();
+    sl.addRange(range);
+    if (text) document.execCommand('insertText', false, text);
+    else document.execCommand('delete');
+  }
+
+  function replaceOne() {
+    if (!isEditable() || findIndex < 0) return;
+    const start = findMatches[findIndex].start;
+    replaceRange(findMatches[findIndex].range, replaceInput.value);
+    scheduleRichSync();
+    runFind(false);
+    // move on to the next match after the one just replaced
+    const len = replaceInput.value.length;
+    const next = findMatches.findIndex((m) => m.start >= start + len);
+    findIndex = findMatches.length ? (next < 0 ? 0 : next) : -1;
+    paintFind(true);
+    replaceInput.focus();
+  }
+
+  function replaceAll() {
+    if (!isEditable() || !findMatches.length) return;
+    const count = findMatches.length;
+    // last to first, so earlier ranges are still in the right place
+    for (let i = findMatches.length - 1; i >= 0; i--) replaceRange(findMatches[i].range, replaceInput.value);
+    scheduleRichSync();
+    runFind(false);
+    replaceNote(`Replaced ${count} — Ctrl+Z undoes one at a time`);
+    replaceInput.focus();
+  }
+
+  // The page changed (typing, mode or tab switch): look again, keeping our place
+  function refreshFind() {
+    if (!findOpen()) return;
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => runFind(false), 150);
+  }
+
+  findInput.addEventListener('input', () => { clearTimeout(findTimer); findTimer = setTimeout(() => runFind(true), 120); });
+  findInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
+  });
+  replaceInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); if (e.ctrlKey || e.altKey) replaceAll(); else replaceOne(); }
+  });
+  $('find-next').addEventListener('click', () => stepFind(1));
+  $('find-prev').addEventListener('click', () => stepFind(-1));
+  $('find-close').addEventListener('click', closeFind);
+  $('replace-one').addEventListener('click', replaceOne);
+  $('replace-all').addEventListener('click', replaceAll);
+  $('find-toggle-replace').addEventListener('click', () => {
+    replaceRow.hidden = !replaceRow.hidden;
+    $('find-toggle-replace').textContent = replaceRow.hidden ? 'Replace' : 'Hide replace';
+    (replaceRow.hidden ? findInput : replaceInput).focus();
+  });
+  for (const [id, set] of [['find-case', (v) => { findCase = v; }], ['find-word', (v) => { findWord = v; }]]) {
+    $(id).addEventListener('click', () => {
+      const on = $(id).getAttribute('aria-pressed') !== 'true';
+      $(id).setAttribute('aria-pressed', String(on));
+      set(on);
+      runFind(true);
+      findInput.focus();
+    });
+  }
+  findBar.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeFind(); } });
+  // F3 / Shift+F3 like other Windows editors
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F3' && findOpen()) { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
+  });
+
   window.api.onOpenFile(openDoc);
   window.api.onCommand(async (cmd) => {
     switch (cmd) {
@@ -859,6 +1114,8 @@
       case 'export-pdf': syncFromRich(); return window.api.exportPdf(filePath);
       case 'print': return window.api.print();
       case 'toggle-sidebar': return setSidebar(!sidebarOpen());
+      case 'find': return openFind(false);
+      case 'replace': return openFind(true);
     }
   });
 
@@ -869,9 +1126,10 @@
     recent = st.recent;
     renderRecent();
     const initial = await window.api.getInitial();
-    if (initial.length) {
-      initial.forEach(openDoc);
-      activate(tabs[0]);
+    if (initial.files.length) {
+      initial.files.forEach(openDoc);
+      const want = (initial.activePath || '').toLowerCase();
+      activate(tabs.find((t) => t.path && t.path.toLowerCase() === want) || tabs[0]);
     } else {
       openDoc(null); // a blank document opens ready to type in
     }

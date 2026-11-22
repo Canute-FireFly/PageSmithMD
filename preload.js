@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   onCommand: (fn) => ipcRenderer.on('cmd', (_e, c) => fn(c)),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setTheme: (t) => ipcRenderer.send('set-theme', t),
+  setSession: (tabs, active) => ipcRenderer.send('set-session', { tabs, active }),
   setSidebar: (open) => ipcRenderer.send('set-sidebar', open),
   removeRecent: (p) => ipcRenderer.send('remove-recent', p),
   onRecent: (fn) => ipcRenderer.on('recent', (_e, list) => fn(list)),

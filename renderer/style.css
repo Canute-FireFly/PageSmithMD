@@ -195,6 +195,32 @@ dialog input[type=text] {
 .markdown-body th, .markdown-body td { padding: 6px 13px; border: 1px solid var(--border); }
 .markdown-body th { font-weight: 600; background: var(--code-bg); }
 
+/* Find and replace */
+#find-bar {
+  display: flex; flex-direction: column; gap: 6px; padding: 6px 14px;
+  background: var(--toolbar); border-bottom: 1px solid var(--border); font-size: 13px;
+}
+#find-bar[hidden], #replace-row[hidden] { display: none; }
+.find-row { display: flex; align-items: center; gap: 6px; }
+#find-bar input {
+  width: 280px; padding: 4px 8px; font: inherit; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+#find-bar input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+#find-bar input.no-match { outline: 2px solid var(--caution); outline-offset: -1px; }
+#find-count { min-width: 80px; color: var(--muted); }
+#replace-note { color: var(--muted); }
+#find-bar button {
+  height: 26px; min-width: 28px; padding: 0 8px; font: inherit; color: var(--fg); cursor: pointer;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+}
+#find-bar button:hover { background: var(--hover); }
+#find-bar button:disabled { opacity: .45; cursor: default; }
+#find-bar button.toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+#find-close { margin-left: auto; border-color: transparent !important; background: transparent !important; font-size: 16px !important; }
+::highlight(find-match) { background-color: rgba(255, 200, 0, .45); color: inherit; }
+::highlight(find-current) { background-color: #ff9632; color: #000; }
+
 /* Highlight */
 .markdown-body mark { background: var(--mark-bg); color: var(--mark-fg); padding: .05em .15em; border-radius: 3px; }
 
@@ -227,7 +253,7 @@ dialog input[type=text] {
 #callout-menu button:hover { background: var(--hover); }
 
 @media print {
-  #tabs, #format-bar, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }
+  #tabs, #format-bar, #find-bar, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }
   #workspace { display: block; }
   #preview-pane { display: block !important; overflow: visible; }
   body { background: #fff; color: #000; display: block; }

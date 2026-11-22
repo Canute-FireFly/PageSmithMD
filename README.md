@@ -8,6 +8,8 @@ Small Electron app for Windows: view and edit Markdown files locally.
 - Sidebar: document outline (click a heading to jump; the current section is highlighted) and recent files; hide it with the slim edge button or Ctrl+Shift+L
 - Highlight: saved as `<mark>text</mark>` so GitHub shows it too; `==text==` (Typora/Obsidian) is also shown and kept
 - Callouts: GitHub alerts `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`; insert one with the Callout button
+- Find and replace (Ctrl+F / Ctrl+H): highlights every match, match case and whole word options, Enter / Shift+Enter or F3 to step; replacing keeps formatting and works in Edit and Split mode
+- Reopen last session: the files you had open come back next time, in the same mode (File > Reopen last session on start)
 - Theme: follow Windows, Light or Dark (status bar button or View > Theme), remembered between runs
 - GitHub-style rendering, code highlighting, relative images and links
 - PDF export, drag and drop, keeps a file's line endings
@@ -27,9 +29,9 @@ once: right-click a .md file > Open with > Choose another app > PageSmithMD > Al
 Remove with `uninstall.ps1`.
 
 ## Settings
-Theme, sidebar open/closed and the recent files list are saved per Windows user in
+Theme, sidebar open/closed, the recent files list and the last session are saved per Windows user in
 `%APPDATA%\PageSmithMD\settings.json`. Delete that file to reset them.
 
 ## Shortcuts
 Ctrl+O open, Ctrl+N new document, Ctrl+W close tab, Ctrl+Tab next tab, Ctrl+S save, Ctrl+Shift+S save as,
-Ctrl+1/2/3 Read/Edit/Split, Ctrl+B / Ctrl+I / Ctrl+K bold / italic / link, Ctrl+Shift+H highlight, Ctrl+P print, Ctrl+Shift+L show/hide sidebar.
+Ctrl+1/2/3 Read/Edit/Split, Ctrl+B / Ctrl+I / Ctrl+K bold / italic / link, Ctrl+F find, Ctrl+H replace, Ctrl+Shift+H highlight, Ctrl+P print, Ctrl+Shift+L show/hide sidebar.

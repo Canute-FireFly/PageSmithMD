@@ -143,8 +143,10 @@ const REPO_URL = 'https://github.com/Canute-FireFly/PageSmithMD';
 
 // The third-party licences open as a (read-only) tab; not added to recent files
 function openLicences() {
-  const p = path.join(__dirname, 'THIRD-PARTY-NOTICES.md');
-  if (!fs.existsSync(p)) { shell.openExternal(REPO_URL + '/blob/main/THIRD-PARTY-NOTICES.md'); return; }
+  // next to the source when running from source; next to PageSmithMD.exe when installed
+  const p = [path.join(__dirname, 'THIRD-PARTY-NOTICES.md'), path.join(path.dirname(process.execPath), 'THIRD-PARTY-NOTICES.md')]
+    .find((f) => fs.existsSync(f));
+  if (!p) { shell.openExternal(REPO_URL + '/blob/main/THIRD-PARTY-NOTICES.md'); return; }
   openPath(p, BrowserWindow.getFocusedWindow(), { recent: false });
 }
 

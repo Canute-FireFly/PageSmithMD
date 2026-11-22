@@ -19,16 +19,92 @@
     "start": "electron .",
     "vendor": "node scripts/vendor.js",
     "icon": "node scripts/make-icon.js",
-    "package": "node scripts/package.js"
+    "package": "node scripts/package.js",
+    "dist": "node scripts/dist.js"
   },
   "devDependencies": {
     "@electron/packager": "^18.3.6",
     "@highlightjs/cdn-assets": "^11.11.1",
     "dompurify": "^3.2.6",
     "electron": "^39.0.0",
+    "electron-builder": "^25.1.8",
     "katex": "^0.16.11",
     "marked": "^16.0.0",
     "turndown": "^7.2.5",
     "turndown-plugin-gfm": "^1.0.2"
+  },
+  "build": {
+    "appId": "io.github.canute-firefly.pagesmithmd",
+    "productName": "PageSmithMD",
+    "copyright": "Copyright (c) 2026 John Moore",
+    "directories": {
+      "output": "release/installer",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "build/icon.ico",
+      "LICENSE",
+      "THIRD-PARTY-NOTICES.md",
+      "package.json"
+    ],
+    "extraFiles": [
+      {
+        "from": "LICENSE",
+        "to": "LICENSE-PageSmithMD.txt"
+      },
+      {
+        "from": "THIRD-PARTY-NOTICES.md",
+        "to": "THIRD-PARTY-NOTICES.md"
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "md",
+          "markdown",
+          "mdown",
+          "mkd"
+        ],
+        "name": "Markdown document",
+        "description": "Markdown document",
+        "role": "Editor",
+        "icon": "icon"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PageSmithMD",
+      "license": "LICENSE",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "uninstallDisplayName": "PageSmithMD ${version}"
+    }
   }
 }

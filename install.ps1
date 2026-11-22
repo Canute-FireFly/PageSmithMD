@@ -1,4 +1,5 @@
-# Installs PageSmithMD for the current user (no admin needed):
+# Developer shortcut: installs the build from `npm run package` for the current user (no admin).
+# Users should use PageSmithMD-Setup-<version>.exe from the Releases page instead; do not mix the two.
 #  - copies the built app to %LOCALAPPDATA%\Programs\PageSmithMD
 #  - registers it as an app for .md / .markdown / .mdown / .mkd files ("Open with")
 #  - creates Start menu and Desktop shortcuts

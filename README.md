@@ -24,19 +24,28 @@ Small Electron app for Windows: view and edit Markdown files locally.
 - GitHub-style rendering, code highlighting, relative images and links
 - PDF export, drag and drop, keeps a file's line endings
 
-## Run from source
+## Install
+Download from the [Releases page](https://github.com/Canute-FireFly/PageSmithMD/releases):
+
+- **PageSmithMD-Setup-<version>.exe**: installs for your Windows account (no admin rights needed),
+  adds Start menu and Desktop shortcuts and registers .md / .markdown / .mdown / .mkd files.
+  Uninstall from Settings > Apps; your settings are kept.
+- **PageSmithMD-<version>-portable.zip**: unzip anywhere and run `PageSmithMD.exe`.
+
+Windows 11 doesn't let an app make itself the default, so do this once: right-click a .md file >
+Open with > Choose another app > PageSmithMD > Always.
+
+The builds aren't code-signed yet, so Windows may show "Windows protected your PC" the first time:
+choose More info > Run anyway.
+
+## Build from source
     npm install
-    npm start [file.md]
+    npm start [file.md]      run from source
+    npm run dist             build the installer and portable zip into release\installer
 
-## Build and install (current user, no admin)
-    npm run package
-    powershell -ExecutionPolicy Bypass -File install.ps1
-
-Installs to `%LOCALAPPDATA%\Programs\PageSmithMD`, adds Start menu and Desktop shortcuts and
-registers .md/.markdown/.mdown/.mkd. Windows 11 won't let an app make itself the default, so do
-once: right-click a .md file > Open with > Choose another app > PageSmithMD > Always.
-
-Remove with `uninstall.ps1`.
+Developer shortcut (no installer): `npm run package`, then `install.ps1` / `uninstall.ps1`
+install or remove the build in `%LOCALAPPDATA%\Programs\PageSmithMD` for the current user.
+Don't mix this with the Setup installer on the same PC; uninstall one before using the other.
 
 ## Settings
 Theme, sidebar open/closed, the recent files list and the last session are saved per Windows user in

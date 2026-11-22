@@ -4,8 +4,10 @@ Small Electron app for Windows: view and edit Markdown files locally.
 
 - Tabs: every file opens in a new tab in the same window
 - Modes: Read (read-only), Edit (type on the rendered page, Word-style) and Split (Markdown source + editable page)
-- Formatting toolbar: bold, italic, strikethrough, code, headings, lists, task list, quote, link, image, code block, table, rule, undo
+- Formatting toolbar: bold, italic, strikethrough, highlight, code, headings, lists, task list, quote, callout, link, image, code block, table, rule, undo
 - Sidebar: document outline (click a heading to jump; the current section is highlighted) and recent files; hide it with the slim edge button or Ctrl+Shift+L
+- Highlight: saved as `<mark>text</mark>` so GitHub shows it too; `==text==` (Typora/Obsidian) is also shown and kept
+- Callouts: GitHub alerts `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`; insert one with the Callout button
 - Theme: follow Windows, Light or Dark (status bar button or View > Theme), remembered between runs
 - GitHub-style rendering, code highlighting, relative images and links
 - PDF export, drag and drop, keeps a file's line endings
@@ -30,4 +32,4 @@ Theme, sidebar open/closed and the recent files list are saved per Windows user 
 
 ## Shortcuts
 Ctrl+O open, Ctrl+N new document, Ctrl+W close tab, Ctrl+Tab next tab, Ctrl+S save, Ctrl+Shift+S save as,
-Ctrl+1/2/3 Read/Edit/Split, Ctrl+B / Ctrl+I / Ctrl+K bold / italic / link, Ctrl+P print, Ctrl+Shift+L show/hide sidebar.
+Ctrl+1/2/3 Read/Edit/Split, Ctrl+B / Ctrl+I / Ctrl+K bold / italic / link, Ctrl+Shift+H highlight, Ctrl+P print, Ctrl+Shift+L show/hide sidebar.

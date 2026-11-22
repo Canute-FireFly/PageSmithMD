@@ -23,6 +23,53 @@
   let lastTarget = 'rich'; // which surface the formatting bar acts on in Split mode
 
   marked.setOptions({ gfm: true, breaks: false });
+  // ==highlight== (Typora / Obsidian style); remembered so it is written back the same way
+  marked.use({
+    extensions: [{
+      name: 'highlight', level: 'inline',
+      start: (src) => src.indexOf('=='),
+      tokenizer(src) {
+        const m = /^==(?=\S)([\s\S]*?\S)==/.exec(src);
+        if (m) return { type: 'highlight', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+      },
+      renderer(tok) { return '<mark data-md="==">' + this.parser.parseInline(tok.tokens) + '</mark>'; },
+    }],
+  });
+
+  // GitHub alert types: > [!NOTE] etc.
+  const ALERTS = {
+    note: { title: 'Note', icon: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/>' },
+    tip: { title: 'Tip', icon: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>' },
+    important: { title: 'Important', icon: '<path d="M4 4h16v12H9l-5 4z"/><path d="M12 7v4M12 13.5v.5"/>' },
+    warning: { title: 'Warning', icon: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17v.5"/>' },
+    caution: { title: 'Caution', icon: '<path d="M8 2h8l6 6v8l-6 6H8l-6-6V8z"/><path d="M12 7v6M12 16.5v.5"/>' },
+  };
+  const alertSvg = (type) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + ALERTS[type].icon + '</svg>';
+  const alertHtml = (type, bodyHtml) =>
+    '<div class="markdown-alert markdown-alert-' + type + '" data-alert="' + type + '">' +
+    '<p class="markdown-alert-title" contenteditable="false">' + alertSvg(type) + ALERTS[type].title + '</p>' + bodyHtml + '</div>';
+
+  // Turn rendered "> [!TYPE]" quotes into callout boxes
+  function applyAlerts(root) {
+    root.querySelectorAll('blockquote').forEach((bq) => {
+      const p = bq.firstElementChild;
+      if (!p || p.tagName !== 'P') return;
+      const t = p.firstChild;
+      if (!t || t.nodeType !== 3) return;
+      const m = /^\s*\[!(note|tip|important|warning|caution)\][ \t]*\n?/i.exec(t.nodeValue);
+      if (!m) return;
+      const type = m[1].toLowerCase();
+      t.nodeValue = t.nodeValue.slice(m[0].length);
+      if (p.firstChild && p.firstChild.nodeName === 'BR') p.firstChild.remove();
+      if (!p.textContent.trim() && !p.querySelector('img')) p.remove();
+      const box = document.createElement('div');
+      box.innerHTML = alertHtml(type, '');
+      const alert = box.firstChild;
+      while (bq.firstChild) alert.appendChild(bq.firstChild);
+      if (alert.children.length === 1) alert.insertAdjacentHTML('beforeend', '<p><br></p>');
+      bq.replaceWith(alert);
+    });
+  }
   document.execCommand('defaultParagraphSeparator', false, 'p');
   document.execCommand('styleWithCSS', false, false);
 
@@ -32,6 +79,25 @@
     emDelimiter: '*', strongDelimiter: '**', hr: '---',
   });
   td.use(turndownPluginGfm.gfm);
+  td.addRule('highlight', {
+    filter: 'mark',
+    replacement: (c, node) => {
+      if (!c.trim()) return c;
+      return node.getAttribute('data-md') === '==' ? '==' + c + '==' : '<mark>' + c + '</mark>';
+    },
+  });
+  td.addRule('alertTitle', {
+    filter: (node) => node.nodeName === 'P' && node.classList.contains('markdown-alert-title'),
+    replacement: () => '',
+  });
+  td.addRule('alert', {
+    filter: (node) => node.nodeName === 'DIV' && node.classList.contains('markdown-alert'),
+    replacement: (c, node) => {
+      const type = (node.getAttribute('data-alert') || 'note').toUpperCase();
+      const body = c.trim().split('\n').map((l) => (l ? '> ' + l : '>')).join('\n');
+      return '\n\n> [!' + type + ']\n' + (body || '>') + '\n\n';
+    },
+  });
   td.addRule('image', {
     filter: 'img',
     replacement: (_c, node) => {
@@ -110,6 +176,7 @@
   // ---------- Markdown -> page ----------
   function render() {
     preview.innerHTML = DOMPurify.sanitize(marked.parse(editor.value));
+    applyAlerts(preview);
     preview.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || '';
       img.setAttribute('data-src', src);
@@ -367,6 +434,46 @@
     bold:   { src: () => srcWrap('**', '**', 'bold text'),   rich: () => exec('bold') },
     italic: { src: () => srcWrap('*', '*', 'italic text'),   rich: () => exec('italic') },
     strike: { src: () => srcWrap('~~', '~~', 'text'),        rich: () => exec('strikeThrough') },
+    highlight: {
+      src: () => srcWrap('<mark>', '</mark>', 'highlighted text'),
+      rich: () => {
+        preview.focus();
+        // Done on the DOM directly: Chrome's insertHTML turns <mark> into a styled <span>
+        const sl = window.getSelection();
+        const m = inside('mark');
+        if (m) { // already highlighted: remove it
+          const first = m.firstChild, last = m.lastChild;
+          m.replaceWith(...m.childNodes);
+          if (first) { const rg = document.createRange(); rg.setStartBefore(first); rg.setEndAfter(last); sl.removeAllRanges(); sl.addRange(rg); }
+          scheduleRichSync();
+          return;
+        }
+        if (!sl.rangeCount) return;
+        const rg = sl.getRangeAt(0);
+        const mark = document.createElement('mark');
+        if (rg.collapsed) {
+          mark.textContent = 'highlighted text';
+          rg.insertNode(mark);
+        } else {
+          const frag = rg.cloneContents();
+          if (frag.querySelector && frag.querySelector('p,div,li,h1,h2,h3,h4,h5,h6,pre,table,blockquote')) {
+            mark.textContent = rg.toString(); // selection spans blocks: highlight its text only
+          } else {
+            mark.appendChild(rg.extractContents());
+            rg.insertNode(mark);
+            mark.querySelectorAll('mark').forEach((x) => x.replaceWith(...x.childNodes));
+            mark.normalize();
+            const r2 = document.createRange(); r2.selectNodeContents(mark); sl.removeAllRanges(); sl.addRange(r2);
+            scheduleRichSync();
+            return;
+          }
+          rg.deleteContents();
+          rg.insertNode(mark);
+        }
+        const r2 = document.createRange(); r2.selectNodeContents(mark); sl.removeAllRanges(); sl.addRange(r2);
+        scheduleRichSync();
+      },
+    },
     code: {
       src: () => srcWrap('`', '`', 'code'),
       rich: () => {
@@ -453,6 +560,7 @@
       },
     },
     hr: { src: () => srcBlock('---'), rich: () => exec('insertHorizontalRule') },
+    callout: { src: () => showCalloutMenu('src'), rich: () => showCalloutMenu('rich') },
     undo: { src: () => { editor.focus(); document.execCommand('undo'); }, rich: () => exec('undo') },
   };
 
@@ -461,6 +569,7 @@
     ['bold', 'Bold (Ctrl+B)', '<span style="font-weight:700">B</span>'],
     ['italic', 'Italic (Ctrl+I)', '<span style="font-style:italic;font-family:Georgia,serif;font-weight:500">I</span>'],
     ['strike', 'Strikethrough', '<span style="text-decoration:line-through;font-weight:500">S</span>'],
+    ['highlight', 'Highlight (Ctrl+Shift+H)', svg('<path d="M15 4l5 5-8 8H7v-5z"/><path d="M4 21h16" stroke-width="3" opacity=".55"/>')],
     ['code', 'Inline code', svg('<path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 5l-4 14"/>')],
     '|',
     ['h1', 'Heading 1', 'H<sub>1</sub>'],
@@ -470,6 +579,7 @@
     ['ul', 'Bulleted list', svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".9"/><circle cx="4.5" cy="12" r=".9"/><circle cx="4.5" cy="18" r=".9"/>')],
     ['ol', 'Numbered list', svg('<path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M3.5 14.5c0-1.2 2.6-1.2 2.6 0 0 1.2-2.6 1.8-2.6 3h2.6"/>')],
     ['task', 'Task list', svg('<path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17M11 6h9M11 12h9M11 18h9"/>')],
+    ['callout', 'Callout (Note, Tip, Important, Warning, Caution)', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16"/><path d="M11 9h6M11 13h4"/>')],
     ['quote', 'Quote', svg('<path d="M5 12h4v5H5zM5 12c0-3 1-4.500 3-5.500M14 12h4v5h-4zM14 12c0-3 1-4.500 3-5.500"/>')],
     '|',
     ['link', 'Link (Ctrl+K)', svg('<path d="M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1 1M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1-1"/>')],
@@ -490,6 +600,70 @@
     b.addEventListener('click', () => runAction(id));
     bar.appendChild(b);
   }
+  // Small menu under the Callout button to pick the type
+  const calloutMenu = document.createElement('div');
+  calloutMenu.id = 'callout-menu';
+  calloutMenu.hidden = true;
+  for (const type of Object.keys(ALERTS)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'markdown-alert-' + type;
+    b.innerHTML = alertSvg(type) + ALERTS[type].title;
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => { calloutMenu.hidden = true; insertCallout(type); });
+    calloutMenu.appendChild(b);
+  }
+  document.body.appendChild(calloutMenu);
+  let calloutTarget = 'rich';
+  let calloutRange = null;
+  function showCalloutMenu(t) {
+    if (!calloutMenu.hidden) { calloutMenu.hidden = true; return; }
+    calloutTarget = t;
+    calloutRange = t === 'rich' ? saveRange() : [editor.selectionStart, editor.selectionEnd];
+    const rc = bar.querySelector('[data-action="callout"]').getBoundingClientRect();
+    calloutMenu.style.left = rc.left + 'px';
+    calloutMenu.style.top = rc.bottom + 4 + 'px';
+    calloutMenu.hidden = false;
+  }
+  document.addEventListener('mousedown', (e) => {
+    if (!calloutMenu.hidden && !calloutMenu.contains(e.target) && !e.target.closest('[data-action="callout"]')) calloutMenu.hidden = true;
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') calloutMenu.hidden = true; });
+  function insertCallout(type) {
+    if (calloutTarget === 'src') {
+      editor.focus();
+      editor.setSelectionRange(calloutRange[0], calloutRange[1]);
+      const sel = editor.value.slice(calloutRange[0], calloutRange[1]);
+      const body = (sel || 'Text').split('\n').map((l) => (l ? '> ' + l : '>')).join('\n');
+      srcBlock('> [!' + type.toUpperCase() + ']\n' + body + '\n');
+      return;
+    }
+    // Placed on the DOM directly (insertHTML mangles the box), after the block holding the caret
+    restoreRange(calloutRange);
+    const sl = window.getSelection();
+    const text = selText();
+    const box = document.createElement('div');
+    box.innerHTML = alertHtml(type, '<p></p>');
+    const alert = box.firstChild;
+    const body = alert.lastChild;
+    if (text) body.textContent = text; else body.appendChild(document.createElement('br'));
+    let block = sl.rangeCount ? sl.getRangeAt(0).startContainer : null;
+    if (block && block.nodeType === 3) block = block.parentElement;
+    while (block && block !== preview && block.parentElement !== preview) block = block.parentElement;
+    if (!block || block === preview) preview.appendChild(alert);
+    else if (block.tagName === 'P' && !block.textContent.trim() && !block.querySelector('img')) block.replaceWith(alert);
+    else {
+      if (text) sl.getRangeAt(0).deleteContents();
+      block.after(alert);
+    }
+    if (!alert.nextElementSibling) alert.insertAdjacentHTML('afterend', '<p><br></p>');
+    const rg = document.createRange();
+    rg.selectNodeContents(body);
+    rg.collapse(false);
+    sl.removeAllRanges(); sl.addRange(rg);
+    scheduleRichSync();
+  }
+
   function runAction(id) {
     if (!isEditable()) return;
     const a = actions[id];
@@ -632,6 +806,9 @@
   });
 
   document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && !e.altKey && isEditable() && e.key.toLowerCase() === 'h') {
+      e.preventDefault(); runAction('highlight'); return;
+    }
     if (e.ctrlKey && !e.shiftKey && !e.altKey && isEditable()) {
       const k = e.key.toLowerCase();
       const id = { b: 'bold', i: 'italic', k: 'link' }[k];

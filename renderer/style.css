@@ -3,6 +3,8 @@
   --toolbar: #f6f8fa; --accent: #0969da; --code-bg: #f6f8fa; --quote: #656d76;
   --fmt-bg: #faf6f4; --fmt-fg: #5f5a57;
   --side-bg: #f6f8fa; --hover: rgba(127,127,127,.15); --sel: rgba(9,105,218,.12);
+  --mark-bg: #fff3a3; --mark-fg: inherit;
+  --note: #0969da; --tip: #1a7f37; --important: #8250df; --warning: #9a6700; --caution: #d1242f;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -11,6 +13,8 @@
     --toolbar: #161b22; --accent: #4493f8; --code-bg: #161b22; --quote: #8d96a0;
     --fmt-bg: #1b1b1d; --fmt-fg: #b4b0ad;
     --side-bg: #11161d; --sel: rgba(68,147,248,.18);
+    --mark-bg: rgba(210,153,34,.4); --mark-fg: #f0f6fc;
+    --note: #4493f8; --tip: #3fb950; --important: #ab7df8; --warning: #d29922; --caution: #f85149;
   }
 }
 * { box-sizing: border-box; }
@@ -190,6 +194,37 @@ dialog input[type=text] {
 .markdown-body table { border-collapse: collapse; display: block; overflow: auto; }
 .markdown-body th, .markdown-body td { padding: 6px 13px; border: 1px solid var(--border); }
 .markdown-body th { font-weight: 600; background: var(--code-bg); }
+
+/* Highlight */
+.markdown-body mark { background: var(--mark-bg); color: var(--mark-fg); padding: .05em .15em; border-radius: 3px; }
+
+/* GitHub-style callouts (alerts) */
+.markdown-alert { padding: 8px 16px; margin: 0 0 16px; border-left: .25em solid var(--alert); color: inherit; }
+.markdown-alert > :last-child { margin-bottom: 0; }
+.markdown-alert-title {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 4px !important; font-weight: 600;
+  color: var(--alert); user-select: none;
+}
+.markdown-alert-title svg, #callout-menu svg {
+  width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.markdown-alert-note { --alert: var(--note); }
+.markdown-alert-tip { --alert: var(--tip); }
+.markdown-alert-important { --alert: var(--important); }
+.markdown-alert-warning { --alert: var(--warning); }
+.markdown-alert-caution { --alert: var(--caution); }
+
+#callout-menu {
+  position: fixed; z-index: 10; display: flex; flex-direction: column; padding: 4px; min-width: 150px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.18);
+}
+#callout-menu[hidden] { display: none; }
+#callout-menu button {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--alert); font: 600 13px "Segoe UI", system-ui, sans-serif; cursor: pointer; text-align: left;
+}
+#callout-menu button:hover { background: var(--hover); }
 
 @media print {
   #tabs, #format-bar, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }

@@ -4,6 +4,10 @@
   const preview = $('preview');        // Rendered page; editable in Edit/Split
   const previewPane = $('preview-pane');
   const tabsEl = $('tabs');
+  const outlineEl = $('outline');
+  const recentEl = $('recent');
+  let recent = [];
+  let headings = [];
 
   // Each open file is a tab; filePath/savedText mirror the active tab
   let tabs = [];
@@ -118,7 +122,103 @@
     applyCheckboxState();
     if (isEditable() && !preview.firstChild) preview.innerHTML = '<p><br></p>';
     updateStats();
+    buildOutline();
   }
+
+  // ---------- sidebar: outline ----------
+  function buildOutline() {
+    headings = [...preview.querySelectorAll('h1,h2,h3,h4,h5,h6')].filter((h) => h.textContent.trim());
+    outlineEl.textContent = '';
+    if (!headings.length) {
+      const p = document.createElement('div');
+      p.className = 'sb-empty';
+      p.textContent = 'No headings';
+      outlineEl.appendChild(p);
+      return;
+    }
+    const top = Math.min(...headings.map((h) => +h.tagName[1]));
+    headings.forEach((h, i) => {
+      const a = document.createElement('a');
+      const level = +h.tagName[1];
+      a.dataset.level = level;
+      a.dataset.i = i;
+      a.style.setProperty('--lvl', level - top);
+      a.textContent = h.textContent.trim();
+      a.title = a.textContent;
+      a.addEventListener('click', () => {
+        previewPane.scrollTo({ top: h.offsetTop - preview.offsetTop, behavior: 'smooth' });
+      });
+      outlineEl.appendChild(a);
+    });
+    markCurrentHeading();
+  }
+
+  function markCurrentHeading() {
+    if (!headings.length) return;
+    const y = previewPane.scrollTop + preview.offsetTop + 40;
+    let cur = 0;
+    headings.forEach((h, i) => { if (h.offsetTop <= y) cur = i; });
+    outlineEl.querySelectorAll('a').forEach((a) => {
+      const on = +a.dataset.i === cur;
+      if (on && !a.classList.contains('current')) a.scrollIntoView({ block: 'nearest' });
+      a.classList.toggle('current', on);
+    });
+  }
+  previewPane.addEventListener('scroll', () => requestAnimationFrame(markCurrentHeading));
+
+  // ---------- sidebar: recent files ----------
+  function renderRecent() {
+    recentEl.textContent = '';
+    if (!recent.length) {
+      const li = document.createElement('li');
+      li.className = 'sb-empty';
+      li.textContent = 'No recent files';
+      recentEl.appendChild(li);
+      return;
+    }
+    const cur = (filePath || '').toLowerCase();
+    for (const p of recent) {
+      const li = document.createElement('li');
+      if (p.toLowerCase() === cur) li.className = 'current';
+      const open = document.createElement('button');
+      open.type = 'button'; open.className = 'open'; open.title = p;
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = basename(p);
+      const d = document.createElement('span'); d.className = 'd'; d.textContent = dirname(p);
+      open.append(n, d);
+      open.addEventListener('click', () => window.api.openPath(p));
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'rm'; rm.title = 'Remove from list'; rm.textContent = '×';
+      rm.addEventListener('click', () => window.api.removeRecent(p));
+      li.append(open, rm);
+      recentEl.appendChild(li);
+    }
+  }
+
+  // ---------- sidebar show/hide, theme ----------
+  function setSidebar(open, persist = true) {
+    document.body.classList.toggle('sidebar-closed', !open);
+    const b = $('sb-toggle');
+    b.title = (open ? 'Hide' : 'Show') + ' sidebar (Ctrl+Shift+L)';
+    b.setAttribute('aria-label', open ? 'Hide sidebar' : 'Show sidebar');
+    if (persist) window.api.setSidebar(open);
+  }
+  const sidebarOpen = () => !document.body.classList.contains('sidebar-closed');
+  $('sb-toggle').addEventListener('click', () => setSidebar(!sidebarOpen()));
+
+  const THEMES = ['system', 'light', 'dark'];
+  const THEME_LABEL = { system: 'Theme: Windows', light: 'Theme: Light', dark: 'Theme: Dark' };
+  let theme = 'system';
+  function showTheme(t) {
+    theme = t;
+    const b = $('theme-btn');
+    b.textContent = THEME_LABEL[t];
+    b.title = 'Click to switch: Follow Windows → Light → Dark (also View → Theme)';
+  }
+  $('theme-btn').addEventListener('click', () => {
+    window.api.setTheme(THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]);
+  });
+  window.api.onTheme(showTheme);
+  window.api.onRecent((list) => { recent = list; renderRecent(); });
 
   function applyCheckboxState() {
     preview.querySelectorAll('input[type=checkbox]').forEach((c) => { c.disabled = !isEditable(); });
@@ -145,6 +245,7 @@
     editor.value = md;
     updateStats();
     updateTitle();
+    buildOutline();
   }
   function scheduleRichSync() {
     richPending = true;
@@ -440,6 +541,8 @@
     setMode(t.mode);
     updateTitle();
     previewPane.scrollTop = t.scroll || 0;
+    renderRecent();
+    markCurrentHeading();
   }
 
   // file = {path, content}, or null for a blank document
@@ -578,10 +681,16 @@
       case 'mode-split': return setMode('split');
       case 'export-pdf': syncFromRich(); return window.api.exportPdf(filePath);
       case 'print': return window.api.print();
+      case 'toggle-sidebar': return setSidebar(!sidebarOpen());
     }
   });
 
   (async () => {
+    const st = await window.api.getSettings();
+    showTheme(st.theme);
+    setSidebar(st.sidebarOpen, false);
+    recent = st.recent;
+    renderRecent();
     const initial = await window.api.getInitial();
     if (initial.length) {
       initial.forEach(openDoc);

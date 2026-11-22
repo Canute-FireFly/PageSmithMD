@@ -19,6 +19,18 @@
       <button type="button" data-mode="edit" title="Edit in the page (Ctrl+2). Split view: View menu (Ctrl+3)">Edit</button>
     </div>
   </nav>
+  <div id="workspace">
+  <aside id="sidebar" aria-label="Sidebar">
+    <section class="sb-section sb-outline">
+      <h2 class="sb-title">Outline</h2>
+      <nav id="outline" aria-label="Document outline"></nav>
+    </section>
+    <section class="sb-section sb-recent">
+      <h2 class="sb-title">Recent files</h2>
+      <ul id="recent"></ul>
+    </section>
+  </aside>
+  <button type="button" id="sb-toggle" title="Hide sidebar (Ctrl+Shift+L)" aria-label="Hide sidebar"></button>
   <main id="panes">
     <section id="editor-pane">
       <textarea id="editor" spellcheck="false" placeholder="Markdown source…"></textarea>
@@ -27,7 +39,8 @@
       <article id="preview" class="markdown-body" spellcheck="true"></article>
     </section>
   </main>
-  <footer id="status"><span id="stats"></span><span id="saved"></span></footer>
+  </div>
+  <footer id="status"><span id="stats"></span><span class="status-right"><span id="saved"></span><button type="button" id="theme-btn"></button></span></footer>
 
   <dialog id="dlg">
     <form method="dialog" id="dlg-form">

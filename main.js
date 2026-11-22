@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -9,13 +9,55 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
+// ---- settings: %APPDATA%PageSmithMDsettings.json (per user) ----
+const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
+const MAX_RECENT = 12;
+const defaults = { theme: 'system', sidebarOpen: true, recent: [] };
+let settings = { ...defaults };
+try {
+  settings = { ...defaults, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
+  if (!Array.isArray(settings.recent)) settings.recent = [];
+  if (!['system', 'light', 'dark'].includes(settings.theme)) settings.theme = 'system';
+} catch (_) { /* first run or unreadable file: use defaults */ }
+
+function saveSettings() {
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    const tmp = SETTINGS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(settings, null, 2), 'utf8');
+    fs.renameSync(tmp, SETTINGS_FILE);
+  } catch (e) {
+    console.error('Cannot save settings:', e.message);
+  }
+}
+
+const existingRecent = () => settings.recent.filter((p) => fs.existsSync(p));
+function broadcast(channel, data) {
+  BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(channel, data));
+}
+function addRecent(p) {
+  const key = p.toLowerCase();
+  settings.recent = [p, ...settings.recent.filter((r) => r.toLowerCase() !== key)].slice(0, MAX_RECENT);
+  saveSettings();
+  broadcast('recent', existingRecent());
+}
+function setTheme(t) {
+  settings.theme = t;
+  nativeTheme.themeSource = t; // drives prefers-color-scheme in every window
+  saveSettings();
+  buildMenu();
+  broadcast('theme', t);
+}
+
 function filesFromArgv(argv) {
   return argv.slice(app.isPackaged ? 1 : 2).filter((a) => !a.startsWith('--') && MD_RE.test(a));
 }
 
 function readFile(p) {
   try {
-    return { path: p, content: fs.readFileSync(p, 'utf8') };
+    const f = { path: p, content: fs.readFileSync(p, 'utf8') };
+    addRecent(p);
+    return f;
   } catch (e) {
     dialog.showErrorBox('Cannot open file', `${p}\n\n${e.message}`);
     return null;
@@ -29,7 +71,7 @@ function createWindow(filePaths = []) {
     minWidth: 520,
     minHeight: 360,
     show: false,
-    backgroundColor: '#ffffff',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0d1117' : '#ffffff',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -123,6 +165,14 @@ function buildMenu() {
         { label: 'Edit', accelerator: 'CmdOrCtrl+2', click: () => send('mode-edit') },
         { label: 'Split (source + edit)', accelerator: 'CmdOrCtrl+3', click: () => send('mode-split') },
         { type: 'separator' },
+        { label: 'Show/hide sidebar', accelerator: 'CmdOrCtrl+Shift+L', click: () => send('toggle-sidebar') },
+        {
+          label: 'Theme',
+          submenu: [['system', 'Follow Windows'], ['light', 'Light'], ['dark', 'Dark']].map(([id, label]) => ({
+            label, type: 'radio', checked: settings.theme === id, click: () => setTheme(id),
+          })),
+        },
+        { type: 'separator' },
         { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => send('next-tab') },
         { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => send('prev-tab') },
         { type: 'separator' },
@@ -162,7 +212,17 @@ ipcMain.handle('save', async (e, { content, saveAs, filePath }) => {
     dialog.showErrorBox('Cannot save file', `${target}\n\n${err.message}`);
     return null;
   }
+  addRecent(target);
   return target;
+});
+
+ipcMain.handle('get-settings', () => ({ theme: settings.theme, sidebarOpen: settings.sidebarOpen, recent: existingRecent() }));
+ipcMain.on('set-theme', (_e, t) => { if (['system', 'light', 'dark'].includes(t)) setTheme(t); });
+ipcMain.on('set-sidebar', (_e, open) => { settings.sidebarOpen = !!open; saveSettings(); });
+ipcMain.on('remove-recent', (_e, p) => {
+  settings.recent = settings.recent.filter((r) => r !== p);
+  saveSettings();
+  broadcast('recent', existingRecent());
 });
 
 ipcMain.handle('confirm-save', (e, name) => {
@@ -216,6 +276,7 @@ app.on('second-instance', (_e, argv) => {
 });
 
 app.whenReady().then(() => {
+  nativeTheme.themeSource = settings.theme;
   buildMenu();
   createWindow(filesFromArgv(process.argv));
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });

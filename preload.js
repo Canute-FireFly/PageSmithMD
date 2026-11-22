@@ -13,5 +13,11 @@ contextBridge.exposeInMainWorld('api', {
   print: () => ipcRenderer.send('print'),
   pathForFile: (f) => webUtils.getPathForFile(f),
   onCommand: (fn) => ipcRenderer.on('cmd', (_e, c) => fn(c)),
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  setTheme: (t) => ipcRenderer.send('set-theme', t),
+  setSidebar: (open) => ipcRenderer.send('set-sidebar', open),
+  removeRecent: (p) => ipcRenderer.send('remove-recent', p),
+  onRecent: (fn) => ipcRenderer.on('recent', (_e, list) => fn(list)),
+  onTheme: (fn) => ipcRenderer.on('theme', (_e, t) => fn(t)),
   onOpenFile: (fn) => ipcRenderer.on('open-file', (_e, f) => fn(f)),
 });

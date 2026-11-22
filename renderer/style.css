@@ -2,12 +2,15 @@
   --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
   --toolbar: #f6f8fa; --accent: #0969da; --code-bg: #f6f8fa; --quote: #656d76;
   --fmt-bg: #faf6f4; --fmt-fg: #5f5a57;
+  --side-bg: #f6f8fa; --hover: rgba(127,127,127,.15); --sel: rgba(9,105,218,.12);
+  color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --border: #30363d;
     --toolbar: #161b22; --accent: #4493f8; --code-bg: #161b22; --quote: #8d96a0;
     --fmt-bg: #1b1b1d; --fmt-fg: #b4b0ad;
+    --side-bg: #11161d; --sel: rgba(68,147,248,.18);
   }
 }
 * { box-sizing: border-box; }
@@ -38,7 +41,65 @@ body {
 #tabs .tab .x:hover, #tabs .plus:hover { background: rgba(127,127,127,.25); }
 #tabs .plus { align-self: center; margin: 0 6px; font-size: 18px; color: var(--muted); }
 
-#panes { flex: 1; display: flex; min-height: 0; }
+#workspace { flex: 1; display: flex; min-height: 0; }
+#panes { flex: 1; display: flex; min-height: 0; min-width: 0; }
+
+/* Sidebar: outline + recent files */
+#sidebar {
+  width: 250px; flex: 0 0 250px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--side-bg); border-right: 1px solid var(--border); font-size: 13px;
+}
+body.sidebar-closed #sidebar { display: none; }
+.sb-section { display: flex; flex-direction: column; min-height: 0; padding: 10px 0 6px; }
+.sb-outline { flex: 1 1 auto; }
+.sb-recent { flex: 0 1 auto; max-height: 40%; border-top: 1px solid var(--border); }
+.sb-title {
+  margin: 0 0 4px; padding: 0 14px; font: 600 11px "Segoe UI", system-ui, sans-serif;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+#outline, #recent { overflow-y: auto; min-height: 0; }
+#outline a {
+  display: block; padding: 3px 12px 3px calc(14px + var(--lvl, 0) * 14px); color: var(--fg);
+  text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-left: 2px solid transparent; cursor: pointer;
+}
+#outline a[data-level="1"] { font-weight: 600; }
+#outline a[data-level="4"], #outline a[data-level="5"], #outline a[data-level="6"] { color: var(--muted); }
+#outline a:hover { background: var(--hover); }
+#outline a.current { background: var(--sel); border-left-color: var(--accent); }
+.sb-empty { padding: 2px 14px; color: var(--muted); font-style: italic; }
+#recent { list-style: none; margin: 0; padding: 0; }
+#recent li { display: flex; align-items: center; }
+#recent li:hover { background: var(--hover); }
+#recent .open {
+  flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--fg);
+  font: inherit; padding: 4px 4px 4px 14px; cursor: pointer;
+}
+#recent .open .n { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#recent .open .d { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+#recent li.current .open .n { color: var(--accent); font-weight: 600; }
+#recent .rm {
+  visibility: hidden; border: 0; background: transparent; color: var(--muted); font-size: 16px;
+  width: 26px; height: 26px; border-radius: 4px; cursor: pointer; margin-right: 4px;
+}
+#recent li:hover .rm { visibility: visible; }
+#recent .rm:hover { background: var(--hover); color: var(--fg); }
+
+/* Slim button on the sidebar edge to hide / show it */
+#sb-toggle {
+  flex: 0 0 14px; width: 14px; border: 0; border-right: 1px solid var(--border); padding: 0;
+  background: var(--side-bg); color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1;
+}
+#sb-toggle::before { content: "\2039"; }
+body.sidebar-closed #sb-toggle::before { content: "\203A"; }
+#sb-toggle:hover { background: var(--hover); color: var(--fg); }
+
+.status-right { display: flex; align-items: center; gap: 12px; }
+#theme-btn {
+  border: 0; background: transparent; color: var(--muted); font: inherit; padding: 0 4px;
+  border-radius: 4px; cursor: pointer;
+}
+#theme-btn:hover { background: var(--hover); color: var(--fg); }
 #editor-pane, #preview-pane { flex: 1 1 0; min-width: 0; overflow: auto; }
 #editor-pane { border-right: 1px solid var(--border); }
 body.mode-read #editor-pane, body.mode-edit #editor-pane { display: none; }
@@ -131,7 +192,8 @@ dialog input[type=text] {
 .markdown-body th { font-weight: 600; background: var(--code-bg); }
 
 @media print {
-  #tabs, #format-bar, #status, #editor-pane { display: none !important; }
+  #tabs, #format-bar, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }
+  #workspace { display: block; }
   #preview-pane { display: block !important; overflow: visible; }
   body { background: #fff; color: #000; display: block; }
   #preview { max-width: none; padding: 0; }

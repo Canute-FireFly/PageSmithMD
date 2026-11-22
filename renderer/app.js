@@ -309,7 +309,13 @@
     let fence = false;
     return md.replace(/ /g, ' ').split('\n').map((line) => {
       if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return line; }
-      return fence ? line : line.replace(/^(\s*)([-*+]|\d+\.)\s{2,}(\[[ xX]\])?\s*/, (_m, ind, mark, box) => `${ind}${mark} ${box ? box + ' ' : ''}`);
+      if (fence) return line;
+      if (!line.trim()) return ''; // e.g. an emptied paragraph comes out as "  "
+      // table separator row: write alignment as :--- / :---: / ---: rather than :-- / :-: / --:
+      if (/^\s*\|(\s*:?-+:?\s*\|)+\s*$/.test(line)) {
+        return line.replace(/(:?)-+(:?)/g, (_m, l, r) => `${l}---${r}`);
+      }
+      return line.replace(/^(\s*)([-*+]|\d+\.)\s{2,}(\[[ xX]\])?\s*/, (_m, ind, mark, box) => `${ind}${mark} ${box ? box + ' ' : ''}`);
     }).join('\n').replace(/\n{3,}/g, '\n\n');
   }
 
@@ -694,6 +700,214 @@
     }
   });
 
+  // ---------- table tools ----------
+  // A small bar floats above the table holding the caret (Edit / Split). Changes are made on the page
+  // and the Markdown follows. GFM tables have one header row and single-line cells.
+  previewPane.style.position = 'relative';
+  const tableBar = document.createElement('div');
+  tableBar.id = 'table-tools';
+  tableBar.hidden = true;
+  tableBar.setAttribute('role', 'toolbar');
+  tableBar.setAttribute('aria-label', 'Table');
+  previewPane.appendChild(tableBar);
+  const tsvg = (d) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + '</svg>';
+  const GRID = '<rect x="3" y="4" width="18" height="16" rx="1.5" opacity=".45"/>';
+  const tableItems = [
+    ['row-above', 'Insert row above', tsvg(GRID + '<path d="M3 12h18"/><path d="M12 6.5v4M10 8.5h4" stroke-width="2"/>')],
+    ['row-below', 'Insert row below', tsvg(GRID + '<path d="M3 12h18"/><path d="M12 13.5v4M10 15.5h4" stroke-width="2"/>')],
+    ['row-delete', 'Delete row', tsvg(GRID + '<path d="M3 9h18M3 15h18"/><path d="M9.5 10.5l5 3M14.5 10.5l-5 3" stroke-width="2"/>')],
+    '|',
+    ['col-left', 'Insert column left', tsvg(GRID + '<path d="M12 4v16"/><path d="M7.5 10v4M5.5 12h4" stroke-width="2"/>')],
+    ['col-right', 'Insert column right', tsvg(GRID + '<path d="M12 4v16"/><path d="M16.5 10v4M14.5 12h4" stroke-width="2"/>')],
+    ['col-delete', 'Delete column', tsvg(GRID + '<path d="M9 4v16M15 4v16"/><path d="M10.5 9.5l3 5M13.5 9.5l-3 5" stroke-width="2"/>')],
+    '|',
+    ['align-left', 'Align column left', tsvg('<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>')],
+    ['align-center', 'Align column centre', tsvg('<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>')],
+    ['align-right', 'Align column right', tsvg('<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>')],
+    '|',
+    ['table-delete', 'Delete table', tsvg('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>')],
+  ];
+  for (const it of tableItems) {
+    if (it === '|') { const g = document.createElement('span'); g.className = 'tsep'; tableBar.appendChild(g); continue; }
+    const [id, title, html] = it;
+    const b = document.createElement('button');
+    b.type = 'button'; b.dataset.op = id; b.title = title; b.setAttribute('aria-label', title); b.innerHTML = html;
+    b.addEventListener('mousedown', (e) => e.preventDefault()); // keep the caret in the cell
+    b.addEventListener('click', () => tableOp(id));
+    tableBar.appendChild(b);
+  }
+
+  const cellOf = (node) => {
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const c = el && el.closest('td,th');
+    return c && preview.contains(c) ? c : null;
+  };
+  const caretCell = () => { const s = window.getSelection(); return s.rangeCount ? cellOf(s.anchorNode) : null; };
+  const rowsOf = (table) => [...table.rows];
+  const colIndex = (cell) => [...cell.parentElement.cells].indexOf(cell);
+  const colCount = (table) => Math.max(...rowsOf(table).map((r) => r.cells.length));
+
+  function putCaret(cell, atEnd) {
+    if (!cell) return;
+    preview.focus();
+    if (!cell.firstChild) cell.appendChild(document.createElement('br'));
+    const r = document.createRange();
+    r.selectNodeContents(cell);
+    r.collapse(!atEnd);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  }
+
+  function newCell(tag, align) {
+    const c = document.createElement(tag);
+    if (align) c.setAttribute('align', align);
+    c.appendChild(document.createElement('br'));
+    return c;
+  }
+  // alignment of each column, read from the header row
+  const aligns = (table) => [...table.rows[0].cells].map((c) => c.getAttribute('align') || '');
+
+  function addRow(table, afterRow) {
+    let body = table.tBodies[0];
+    if (!body) { body = document.createElement('tbody'); table.appendChild(body); }
+    const al = aligns(table);
+    const row = document.createElement('tr');
+    for (let i = 0; i < colCount(table); i++) row.appendChild(newCell('td', al[i]));
+    if (!afterRow || afterRow.parentElement.tagName === 'THEAD') body.insertBefore(row, body.firstChild);
+    else afterRow.after(row);
+    return row;
+  }
+
+  function tableOp(op) {
+    const cell = caretCell();
+    if (!cell || !isEditable()) return;
+    const table = cell.closest('table');
+    const row = cell.parentElement;
+    const col = colIndex(cell);
+    const isHead = row.parentElement.tagName === 'THEAD';
+    let target = cell;
+    switch (op) {
+      case 'row-above': {
+        if (isHead) return;
+        const al = aligns(table);
+        const r = document.createElement('tr');
+        for (let i = 0; i < colCount(table); i++) r.appendChild(newCell('td', al[i]));
+        row.before(r);
+        target = r.cells[col];
+        break;
+      }
+      case 'row-below':
+        target = addRow(table, row).cells[col];
+        break;
+      case 'row-delete': {
+        if (isHead) return;
+        const next = row.nextElementSibling || row.previousElementSibling;
+        row.remove();
+        target = next ? next.cells[Math.min(col, next.cells.length - 1)] : table.rows[0].cells[col];
+        break;
+      }
+      case 'col-left':
+      case 'col-right': {
+        const at = op === 'col-left' ? col : col + 1;
+        for (const r of rowsOf(table)) {
+          const tag = r.parentElement.tagName === 'THEAD' ? 'th' : 'td';
+          const c = newCell(tag, '');
+          r.insertBefore(c, r.cells[at] || null);
+        }
+        target = row.cells[at];
+        break;
+      }
+      case 'col-delete': {
+        if (colCount(table) <= 1) return tableOp('table-delete');
+        for (const r of rowsOf(table)) if (r.cells[col]) r.cells[col].remove();
+        target = row.cells[Math.min(col, row.cells.length - 1)];
+        break;
+      }
+      case 'align-left':
+      case 'align-center':
+      case 'align-right': {
+        const want = op.slice(6);
+        const same = (table.rows[0].cells[col]?.getAttribute('align') || '') === want;
+        for (const r of rowsOf(table)) {
+          const c = r.cells[col];
+          if (!c) continue;
+          if (same) c.removeAttribute('align'); else c.setAttribute('align', want);
+        }
+        break;
+      }
+      case 'table-delete': {
+        const p = document.createElement('p');
+        p.appendChild(document.createElement('br'));
+        table.replaceWith(p);
+        tableBar.hidden = true;
+        const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        scheduleRichSync();
+        return;
+      }
+    }
+    putCaret(target);
+    scheduleRichSync();
+    placeTableBar();
+  }
+
+  // Show the bar above the current table, and reflect what can be done here
+  function placeTableBar() {
+    const cell = isEditable() ? caretCell() : null;
+    if (!cell) { tableBar.hidden = true; return; }
+    const table = cell.closest('table');
+    const isHead = cell.parentElement.parentElement.tagName === 'THEAD';
+    tableBar.querySelector('[data-op="row-above"]').disabled = isHead;
+    tableBar.querySelector('[data-op="row-delete"]').disabled = isHead;
+    const al = table.rows[0].cells[colIndex(cell)]?.getAttribute('align') || '';
+    for (const a of ['left', 'center', 'right']) {
+      tableBar.querySelector(`[data-op="align-${a}"]`).classList.toggle('active', al === a);
+    }
+    tableBar.hidden = false;
+    const pr = previewPane.getBoundingClientRect();
+    const tr = table.getBoundingClientRect();
+    let top = tr.top - pr.top + previewPane.scrollTop - tableBar.offsetHeight - 6;
+    if (top < previewPane.scrollTop + 4) top = tr.bottom - pr.top + previewPane.scrollTop + 6; // no room above: go below
+    tableBar.style.top = top + 'px';
+    tableBar.style.left = Math.max(4, tr.left - pr.left) + 'px';
+  }
+  document.addEventListener('selectionchange', () => {
+    if (document.activeElement === preview || !caretCell()) placeTableBar();
+  });
+  preview.addEventListener('input', () => { if (!tableBar.hidden) placeTableBar(); });
+  window.addEventListener('resize', () => { if (!tableBar.hidden) placeTableBar(); });
+  preview.addEventListener('blur', () => {
+    setTimeout(() => { if (document.activeElement !== preview && !tableBar.contains(document.activeElement)) tableBar.hidden = true; }, 0);
+  });
+
+  // Tab / Shift+Tab between cells (Tab in the last cell adds a row); Enter moves down a row
+  preview.addEventListener('keydown', (e) => {
+    if (!isEditable() || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key !== 'Tab' && e.key !== 'Enter') return;
+    const cell = caretCell();
+    if (!cell) return;
+    e.preventDefault();
+    const table = cell.closest('table');
+    const rows = rowsOf(table);
+    const ri = rows.indexOf(cell.parentElement);
+    const ci = colIndex(cell);
+    if (e.key === 'Tab') {
+      const cells = rows.flatMap((r) => [...r.cells]);
+      const i = cells.indexOf(cell);
+      if (e.shiftKey) { if (i > 0) putCaret(cells[i - 1], true); return; }
+      if (i < cells.length - 1) { putCaret(cells[i + 1], true); return; }
+      putCaret(addRow(table, cell.parentElement).cells[0]);
+      scheduleRichSync();
+      placeTableBar();
+      return;
+    }
+    if (e.shiftKey) return; // no line breaks inside a Markdown table cell
+    const below = rows[ri + 1];
+    if (below) { putCaret(below.cells[Math.min(ci, below.cells.length - 1)], true); return; }
+    putCaret(addRow(table, cell.parentElement).cells[ci]);
+    scheduleRichSync();
+    placeTableBar();
+  });
+
   // ---------- modes / files ----------
   function setMode(m) {
     if (mode !== 'read') syncFromRich();
@@ -707,6 +921,7 @@
     if (m === 'split') editor.focus();
     reportSession();
     if (findOpen()) { updateReplaceState(); refreshFind(); }
+    placeTableBar();
   }
 
   // ---------- tabs ----------

@@ -195,6 +195,25 @@ dialog input[type=text] {
 .markdown-body th, .markdown-body td { padding: 6px 13px; border: 1px solid var(--border); }
 .markdown-body th { font-weight: 600; background: var(--code-bg); }
 
+/* Table tools (float above the table holding the caret) */
+#table-tools {
+  position: absolute; z-index: 5; display: flex; align-items: center; gap: 1px; padding: 3px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.14);
+}
+#table-tools[hidden] { display: none; }
+#table-tools button {
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0;
+  border: 0; border-radius: 5px; background: transparent; color: var(--fmt-fg); cursor: pointer;
+}
+#table-tools button:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+#table-tools button.active { background: var(--sel); color: var(--accent); }
+#table-tools button:disabled { opacity: .35; cursor: default; }
+#table-tools svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#table-tools .tsep { width: 1px; height: 18px; margin: 0 4px; background: var(--border); }
+.markdown-body th[align=left], .markdown-body td[align=left] { text-align: left; }
+.markdown-body th[align=center], .markdown-body td[align=center] { text-align: center; }
+.markdown-body th[align=right], .markdown-body td[align=right] { text-align: right; }
+
 /* Find and replace */
 #find-bar {
   display: flex; flex-direction: column; gap: 6px; padding: 6px 14px;
@@ -253,7 +272,7 @@ dialog input[type=text] {
 #callout-menu button:hover { background: var(--hover); }
 
 @media print {
-  #tabs, #format-bar, #find-bar, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }
+  #tabs, #format-bar, #find-bar, #table-tools, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }
   #workspace { display: block; }
   #preview-pane { display: block !important; overflow: visible; }
   body { background: #fff; color: #000; display: block; }

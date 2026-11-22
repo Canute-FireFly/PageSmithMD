@@ -33,7 +33,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Links in documents never start programs or scripts; pictures, PDFs, office documents and folders
   open only after you confirm.
 
-### Install
+### Install and updates
+- Update check against GitHub releases: asks before downloading, installs on restart; can be turned
+  off; the portable version links to the download page.
 - Windows installer (per user, no admin, .md file types, uninstall from Settings > Apps) and a portable zip.
 
 [Unreleased]: https://github.com/Canute-FireFly/PageSmithMD/compare/v0.9.0...HEAD

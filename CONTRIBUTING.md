@@ -72,6 +72,21 @@ There are no automated tests yet, so please try your change in the app:
 3. Check both light and dark themes.
 4. Run `npm run dist` once to make sure the installer still builds.
 
+## Making a release (maintainers)
+1. Update `version` in `package.json` (for example `0.9.1`) and add a section for it to
+   `CHANGELOG.md`; commit both.
+2. Tag the commit with the same version and push the tag:
+
+       git tag v0.9.1
+       git push origin v0.9.1
+
+3. GitHub Actions ([release.yml](.github/workflows/release.yml)) builds the Setup .exe, the portable
+   .zip and the update files on Windows and uploads them to a **draft** release. The build fails if
+   the tag doesn't match `package.json`.
+4. Open the draft on the [Releases page](https://github.com/Canute-FireFly/PageSmithMD/releases),
+   paste in the changelog section as the description, try the Setup, then press **Publish**.
+   Installed copies see the update only once it's published.
+
 ## Sending a pull request
 1. Fork the repository and create a branch from `main`.
 2. Keep each pull request to one change, with a clear title and a description of what and why.

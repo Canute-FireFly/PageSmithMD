@@ -105,6 +105,17 @@
       "deleteAppDataOnUninstall": false,
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "uninstallDisplayName": "PageSmithMD ${version}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Canute-FireFly",
+        "repo": "PageSmithMD",
+        "releaseType": "draft"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }

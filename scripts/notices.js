@@ -16,6 +16,15 @@ const bundled = [
   { pkg: 'katex', use: 'Maths typesetting (including its fonts)' },
 ];
 
+// Plus every runtime dependency packed into the app (electron-updater and what it uses)
+const { execSync } = require('child_process');
+const runtime = execSync('npm ls --omit=dev --all --parseable', { cwd: root, encoding: 'utf8' })
+  .split(/\r?\n/).slice(1).filter(Boolean)
+  .map((p) => p.split(/node_modules[\\/]/).pop().replace(/\\/g, '/'));
+for (const pkg of [...new Set(runtime)].sort()) {
+  if (!bundled.some((b) => b.pkg === pkg)) bundled.push({ pkg, use: pkg === 'electron-updater' ? 'Update checks and installs' : 'Used by electron-updater' });
+}
+
 function licenceText(dir) {
   const f = fs.readdirSync(dir).find((n) => /^licen[cs]e(\.md|\.txt)?$/i.test(n));
   return f ? fs.readFileSync(path.join(dir, f), 'utf8').trim() : null;
@@ -38,7 +47,13 @@ for (const b of bundled) {
   const pj = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
   const name = b.name || pj.name;
   const licence = typeof pj.license === 'string' ? pj.license : (pj.license && pj.license.type) || 'see below';
-  const text = licenceText(dir);
+  let text = licenceText(dir);
+  if (!text && licence === 'MIT') {
+    // Some packages say "MIT" without shipping the text; use the standard MIT text with their author
+    const author = typeof pj.author === 'string' ? pj.author : (pj.author && pj.author.name) || `the ${name} authors`;
+    text = fs.readFileSync(path.join(root, 'LICENSE'), 'utf8').trim()
+      .replace(/^Copyright \(c\) .*$/m, `Copyright (c) ${author}`);
+  }
   if (!text) throw new Error(`No licence file found for ${b.pkg}`);
   out += `| ${name} | ${pj.version} | ${licence} | ${b.use} |\n`;
   const home = pj.homepage || (pj.repository && (pj.repository.url || pj.repository)) || '';

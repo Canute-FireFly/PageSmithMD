@@ -96,7 +96,14 @@ changes kept for crash recovery live in `%APPDATA%\PageSmithMD\recovery` and are
 exit normally.
 
 PageSmithMD doesn't collect or send any data. It only goes online to show pictures that a document
-links from the web, and when you open a link.
+links from the web, when you open a link, and to check GitHub for a newer version (see below).
+
+## Updates
+The installed app checks GitHub for a new version a few seconds after it starts, and you can check
+any time with **Help > Check for updates**. It always asks before downloading; a downloaded update
+installs when you restart or close PageSmithMD. Turn the automatic check off with
+**Help > Check for updates automatically**. The portable version tells you about a new version and
+opens the download page.
 
 ## Build from source
 You need [Node.js](https://nodejs.org/) 20 or later.

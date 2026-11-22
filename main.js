@@ -13,7 +13,7 @@ if (!app.requestSingleInstanceLock()) {
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const MAX_RECENT = 12;
 // session = the tabs open when the app last closed: [{ path, mode }], plus which one was active
-const defaults = { theme: 'system', sidebarOpen: true, recent: [], reopenSession: true, session: [], sessionActive: null, mdShortcuts: true, autoSave: true, markExternal: true };
+const defaults = { theme: 'system', sidebarOpen: true, recent: [], reopenSession: true, session: [], sessionActive: null, mdShortcuts: true, autoSave: true, markExternal: true, checkUpdates: true, skipVersion: null };
 let settings = { ...defaults };
 try {
   settings = { ...defaults, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
@@ -140,6 +140,117 @@ function createWindow(filePaths = [], restore = false, recovered = []) {
 // Opens a file as a new tab in the given (or focused, or first) window
 // ---- Help menu ----
 const REPO_URL = 'https://github.com/Canute-FireFly/PageSmithMD';
+
+// ---- updates (published GitHub releases) ----
+// The installed app checks a few seconds after starting (if enabled) and from Help > Check for
+// updates. It always asks before downloading. The portable zip can't update itself, so it just
+// offers the download page. Nothing is checked when running from source.
+let updater = null;
+let updateReady = null; // version that has been downloaded and will install on exit
+let checking = false;
+
+const isInstalledCopy = () => fs.existsSync(path.join(path.dirname(process.execPath), 'Uninstall PageSmithMD.exe'));
+
+function getUpdater() {
+  if (updater || !app.isPackaged) return updater;
+  updater = require('electron-updater').autoUpdater;
+  updater.autoDownload = false;          // always ask first
+  updater.autoInstallOnAppQuit = true;   // a downloaded update installs when PageSmithMD closes
+  updater.logger = null;
+  return updater;
+}
+
+// 1.2.10 > 1.2.9; a pre-release (1.3.0-beta) counts as older than its release
+function newerVersion(a, b) {
+  const parse = (v) => String(v || '').replace(/^v/, '').split('-');
+  const [ma, pa] = parse(a), [mb, pb] = parse(b);
+  const na = ma.split('.').map(Number), nb = mb.split('.').map(Number);
+  for (let i = 0; i < 3; i++) { if ((na[i] || 0) !== (nb[i] || 0)) return (na[i] || 0) > (nb[i] || 0); }
+  return !pa && !!pb;
+}
+
+const plainNotes = (notes) => {
+  const text = (Array.isArray(notes) ? notes.map((n) => n.note || '').join('\n') : String(notes || ''))
+    .replace(/<\/(p|li|h\d)>/gi, '\n').replace(/<li>/gi, '• ').replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n').trim();
+  return text.length > 700 ? text.slice(0, 700).trimEnd() + '…' : text;
+};
+
+async function checkForUpdates(manual) {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  const tell = (message, detail, type = 'info') => dialog.showMessageBox(win, { type, title: 'PageSmithMD', message, detail, buttons: ['OK'], noLink: true });
+  if (!app.isPackaged) { if (manual) tell('Updates are checked in the installed app.', 'You are running PageSmithMD from source.'); return; }
+  if (updateReady) { if (manual) askRestart(updateReady); return; }
+  if (checking) return;
+  checking = true;
+  let result;
+  try {
+    result = await getUpdater().checkForUpdates();
+  } catch (err) {
+    if (manual) tell("Couldn't check for updates.", 'Check your internet connection and try again.\n\n' + err.message, 'warning');
+    return;
+  } finally {
+    checking = false;
+  }
+  const info = result && result.updateInfo;
+  const current = app.getVersion();
+  if (!info || !newerVersion(info.version, current)) {
+    if (manual) tell("You're up to date.", `PageSmithMD ${current} is the latest version.`);
+    return;
+  }
+  if (!manual && settings.skipVersion === info.version) return;
+
+  const installed = isInstalledCopy();
+  const notes = plainNotes(info.releaseNotes);
+  const buttons = installed ? ['Download and install', 'Later', 'Skip this version'] : ['Open download page', 'Later', 'Skip this version'];
+  const r = await dialog.showMessageBox(win, {
+    type: 'info',
+    title: 'PageSmithMD update',
+    message: `PageSmithMD ${info.version} is available.`,
+    detail: `You have ${current}.` + (installed ? '' : ' This copy is the portable version, so download the new one and replace it.') +
+      (notes ? '\n\nWhat\'s new:\n' + notes : ''),
+    buttons,
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (r.response === 2) { settings.skipVersion = info.version; saveSettings(); return; }
+  if (r.response !== 0) return;
+  if (!installed) { shell.openExternal(REPO_URL + '/releases/latest'); return; }
+
+  const u = getUpdater();
+  const onProgress = (p) => BrowserWindow.getAllWindows().forEach((w) => w.setProgressBar(Math.max(0.02, p.percent / 100)));
+  u.on('download-progress', onProgress);
+  try {
+    await u.downloadUpdate();
+  } catch (err) {
+    tell("The update couldn't be downloaded.", 'Please try again later, or download it from the GitHub page.\n\n' + err.message, 'warning');
+    return;
+  } finally {
+    u.removeListener('download-progress', onProgress);
+    BrowserWindow.getAllWindows().forEach((w) => w.setProgressBar(-1));
+  }
+  updateReady = info.version;
+  buildMenu();
+  askRestart(info.version);
+}
+
+async function askRestart(version) {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  const r = await dialog.showMessageBox(win, {
+    type: 'info',
+    title: 'PageSmithMD update',
+    message: `PageSmithMD ${version} is ready to install.`,
+    detail: 'Restart now to install it, or carry on and it will install when you close PageSmithMD.\nYou\'ll be asked about any unsaved changes first.',
+    buttons: ['Restart and install', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  // closing goes through the normal "save changes?" questions; if that's cancelled, it installs on the next exit
+  if (r.response === 0) getUpdater().quitAndInstall(true, true);
+}
 
 // The third-party licences open as a (read-only) tab; not added to recent files
 function openLicences() {
@@ -284,6 +395,12 @@ function buildMenu() {
       submenu: [
         { label: 'PageSmithMD on GitHub', click: () => shell.openExternal(REPO_URL) },
         { label: 'Report a problem…', click: () => shell.openExternal(REPO_URL + '/issues/new') },
+        { type: 'separator' },
+        { label: updateReady ? `Restart to install ${updateReady}` : 'Check for updates…', click: () => checkForUpdates(true) },
+        {
+          label: 'Check for updates automatically', type: 'checkbox', checked: settings.checkUpdates,
+          click: (item) => { settings.checkUpdates = item.checked; saveSettings(); },
+        },
         { type: 'separator' },
         { label: 'Licences', click: () => openLicences() },
         { type: 'separator' },
@@ -586,6 +703,8 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = settings.theme;
   buildMenu();
   createWindow(filesFromArgv(process.argv), true, takeRecovery());
+  // a quiet update check once PageSmithMD has settled (installed app only; offline is fine)
+  if (settings.checkUpdates && app.isPackaged) setTimeout(() => checkForUpdates(false), 8000);
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow([], true); });
 });
 

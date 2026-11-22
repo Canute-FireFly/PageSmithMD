@@ -101,7 +101,7 @@
       tabsEl.appendChild(el);
     }
     const plus = document.createElement('button');
-    plus.className = 'plus'; plus.type = 'button'; plus.title = 'New tab (Ctrl+N)'; plus.textContent = '+';
+    plus.className = 'plus'; plus.type = 'button'; plus.title = 'New document (Ctrl+N)'; plus.textContent = '+';
     plus.addEventListener('click', () => openDoc(null));
     tabsEl.appendChild(plus);
     tabsEl.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });

@@ -29,5 +29,5 @@ Theme, sidebar open/closed and the recent files list are saved per Windows user 
 `%APPDATA%\PageSmithMD\settings.json`. Delete that file to reset them.
 
 ## Shortcuts
-Ctrl+O open, Ctrl+N new tab, Ctrl+W close tab, Ctrl+Tab next tab, Ctrl+S save, Ctrl+Shift+S save as,
+Ctrl+O open, Ctrl+N new document, Ctrl+W close tab, Ctrl+Tab next tab, Ctrl+S save, Ctrl+Shift+S save as,
 Ctrl+1/2/3 Read/Edit/Split, Ctrl+B / Ctrl+I / Ctrl+K bold / italic / link, Ctrl+P print, Ctrl+Shift+L show/hide sidebar.

@@ -138,7 +138,7 @@ function buildMenu() {
     {
       label: '&File',
       submenu: [
-        { label: 'New tab', accelerator: 'CmdOrCtrl+N', click: () => send('new-tab') },
+        { label: 'New', accelerator: 'CmdOrCtrl+N', click: () => send('new-tab') },
         { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: () => pickAndOpen(BrowserWindow.getFocusedWindow()) },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => send('save') },

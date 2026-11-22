@@ -175,6 +175,14 @@ dialog input[type=text] {
 .dlg-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .dlg-buttons button { font: inherit; padding: 4px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--toolbar); color: var(--fg); cursor: pointer; }
 #dlg-ok { background: var(--accent); border-color: var(--accent); color: #fff; }
+#dlg-extra { margin-right: auto; color: var(--caution); }
+#dlg-extra[hidden] { display: none; }
+#dlg-label2:empty { display: none; }
+#dlg-label2 { margin-top: 4px; }
+/* Links to websites get a small arrow (View > Mark links to websites) */
+.markdown-body.ext-marks a[href^="http"]::after {
+  content: "↗"; font-size: .75em; margin-left: .12em; opacity: .7; text-decoration: none; display: inline-block;
+}
 
 #editor {
   display: block; width: 100%; height: 100%; resize: none; border: 0; outline: 0;

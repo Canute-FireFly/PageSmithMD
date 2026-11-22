@@ -11,6 +11,7 @@ Small Electron app for Windows: view and edit Markdown files locally.
 - Front matter: a YAML block (`---` ... `---`) at the top is shown as a read-only panel, left out of the outline, and kept exactly as written when you edit the page; change it in Split view
 - Highlight: saved as `<mark>text</mark>` so GitHub shows it too; `==text==` (Typora/Obsidian) is also shown and kept
 - Callouts: GitHub alerts `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`; insert one with the Callout button
+- Links: Ctrl+K (or the Link button) asks for the address and the text to show; with the cursor in a link it opens it to change, with Remove link. Paste a web address over selected words to link them. Hover a link to see where it goes; click (Read) or Ctrl+click (Edit) opens websites in your browser. Website links get a small ↗ (View > Mark links to websites)
 - Paste Markdown: text pasted onto the page is read as Markdown (formulas, bold, lists, headings...); Ctrl+Shift+V pastes it literally
 - Paste images: paste a screenshot (Ctrl+V) or drop an image file while editing; it is saved in an `images` folder next to the document and linked with a relative path (a new document is saved first)
 - Table tools: with the cursor in a table (Edit/Split), a small bar adds or deletes rows and columns, aligns a column (saved as :--- / :---: / ---:) or deletes the table; Tab / Shift+Tab move between cells (Tab in the last cell adds a row), Enter moves down a row

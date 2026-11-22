@@ -522,6 +522,13 @@
   }
 
   editor.addEventListener('paste', (e) => {
+    const t = e.clipboardData.getData('text/plain').trim();
+    const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+    if (t && isUrl(t) && sel && !sel.includes('\n') && !plainPaste) {
+      e.preventDefault();
+      srcInsert('[' + sel + '](' + normUrl(t) + ')');
+      return;
+    }
     const img = clipboardImage(e.clipboardData);
     if (!img) return;
     e.preventDefault();
@@ -613,6 +620,12 @@
     const plain = plainPaste;
     plainPaste = false;
     if (plain) { document.execCommand('insertText', false, text); return; }
+    const sel0 = window.getSelection();
+    if (text && isUrl(text.trim()) && sel0.rangeCount && !sel0.isCollapsed && !inside('a') &&
+        !String(sel0).includes('\n')) {
+      document.execCommand('createLink', false, normUrl(text.trim()));
+      return;
+    }
     if (html && !isJustStyledText(html)) {
       document.execCommand('insertHTML', false, DOMPurify.sanitize(html, { FORBID_ATTR: ['style', 'class', 'id'] }));
     } else if (text) {
@@ -622,18 +635,25 @@
 
   // ---------- dialog ----------
   const dlg = $('dlg');
-  function ask(label, value, label2) {
+  // ask(label, value, label2, { value2, extra }) -> [value, value2], { extra: true } or null (cancelled)
+  function ask(label, value, label2, opts = {}) {
     return new Promise((resolve) => {
       $('dlg-label').textContent = label;
       const i1 = $('dlg-input'), i2 = $('dlg-input2');
       i1.value = value || '';
-      i2.value = '';
+      i2.value = opts.value2 || '';
       i2.style.display = label2 ? '' : 'none';
-      i2.placeholder = label2 || '';
+      $('dlg-label2').textContent = label2 || '';
+      i2.placeholder = opts.placeholder2 || '';
+      const extra = $('dlg-extra');
+      extra.hidden = !opts.extra;
+      extra.textContent = opts.extra || '';
       $('dlg-ok').value = 'ok';
       dlg.returnValue = '';
       dlg.addEventListener('close', () => {
-        resolve(dlg.returnValue === 'ok' ? [i1.value.trim(), i2.value.trim()] : null);
+        if (dlg.returnValue === 'ok') resolve([i1.value.trim(), i2.value.trim()]);
+        else if (dlg.returnValue === 'extra') resolve({ extra: true });
+        else resolve(null);
       }, { once: true });
       dlg.showModal();
       i1.focus();
@@ -641,6 +661,72 @@
     });
   }
   $('dlg-cancel').addEventListener('click', () => dlg.close('cancel'));
+  $('dlg-extra').addEventListener('click', () => dlg.close('extra'));
+
+  // ---------- links ----------
+  const isUrl = (s) => /^(https?:\/\/|mailto:|www\.)[^\s<>"]+$/i.test(s);
+  const normUrl = (s) => (/^www\./i.test(s) ? 'https://' + s : s);
+
+  // Ctrl+K / Link button on the page: edit the link at the caret, or make one
+  async function linkRich() {
+    const range = saveRange();
+    const a = inside('a');
+    const sel = selText();
+    const selUrl = isUrl(sel.trim());
+    const href0 = a ? a.getAttribute('href') || '' : selUrl ? sel.trim() : '';
+    const text0 = a ? a.textContent : selUrl ? '' : sel;
+    const r = await ask('Address', href0 || 'https://', 'Text to show', {
+      value2: text0, placeholder2: 'Leave empty to show the address', extra: a ? 'Remove link' : null,
+    });
+    restoreRange(range);
+    if (!r) return;
+    const s = window.getSelection();
+    if (r.extra) { // unwrap: keep the words, drop the link
+      const rg = document.createRange(); rg.selectNodeContents(a);
+      s.removeAllRanges(); s.addRange(rg);
+      document.execCommand('unlink');
+      return;
+    }
+    const [addr, txt] = r;
+    if (!addr || addr === 'https://') return;
+    const url = normUrl(addr);
+    if (a) {
+      a.setAttribute('href', url);
+      if (txt && txt !== a.textContent) a.textContent = txt;
+      scheduleRichSync();
+      return;
+    }
+    if (sel && (!txt || txt === sel)) { document.execCommand('createLink', false, url); return; }
+    // a new link at the caret; the invisible character after it keeps further typing outside the link
+    document.execCommand('insertHTML', false, `<a href="${escAttr(url)}">${esc(txt || addr)}</a>` + '\u200B');
+  }
+
+  // Same in the Markdown pane: [text](address) at the caret is edited in place
+  async function linkSrc() {
+    const v = editor.value;
+    const s0 = editor.selectionStart, e0 = editor.selectionEnd;
+    const ls = v.lastIndexOf('\n', s0 - 1) + 1;
+    let le = v.indexOf('\n', s0); if (le < 0) le = v.length;
+    const line = v.slice(ls, le);
+    let found = null;
+    for (const m of line.matchAll(/(?<!!)\[([^\]]*)\]\(([^)\s]*)\)/g)) {
+      if (s0 - ls >= m.index && s0 - ls <= m.index + m[0].length) { found = { start: ls + m.index, end: ls + m.index + m[0].length, text: m[1], href: m[2] }; break; }
+    }
+    const sel = v.slice(s0, e0);
+    const selUrl = isUrl(sel.trim());
+    const r = await ask('Address', found ? found.href : selUrl ? sel.trim() : 'https://', 'Text to show', {
+      value2: found ? found.text : selUrl ? '' : sel, placeholder2: 'Leave empty to show the address', extra: found ? 'Remove link' : null,
+    });
+    if (!r) { editor.focus(); return; }
+    editor.focus();
+    if (found) editor.setSelectionRange(found.start, found.end); else editor.setSelectionRange(s0, e0);
+    if (r.extra) { srcInsert(found.text); return; }
+    const [addr, txt] = r;
+    if (!addr || addr === 'https://') return;
+    const url = normUrl(addr);
+    srcInsert(`[${txt || (found ? found.text : sel) || addr}](${url})`);
+  }
+
 
   // ---------- formatting actions ----------
   const target = () => (mode === 'edit' ? 'rich' : (document.activeElement === editor ? 'src' : (document.activeElement === preview ? 'rich' : (lastTarget === 'src' ? 'src' : 'rich'))));
@@ -779,26 +865,7 @@
       src: () => srcPrefix('> '),
       rich: () => (inside('blockquote') ? exec('outdent') : exec('formatBlock', 'blockquote')),
     },
-    link: {
-      src: async () => {
-        const s = editor.selectionStart, e = editor.selectionEnd;
-        const text = editor.value.slice(s, e);
-        const r = await ask('Link address', 'https://');
-        if (!r || !r[0]) return;
-        editor.focus();
-        editor.setSelectionRange(s, e);
-        srcInsert(`[${text || r[0]}](${r[0]})`);
-      },
-      rich: async () => {
-        const range = saveRange();
-        const text = selText();
-        const r = await ask('Link address', 'https://');
-        restoreRange(range);
-        if (!r || !r[0]) return;
-        if (text) document.execCommand('createLink', false, r[0]);
-        else document.execCommand('insertHTML', false, `<a href="${esc(r[0])}">${esc(r[0])}</a>`);
-      },
-    },
+    link: { src: () => linkSrc(), rich: () => linkRich() },
     image: {
       src: async () => {
         const s = editor.selectionStart, e = editor.selectionEnd;
@@ -1948,6 +2015,14 @@
   });
 
   // Links: click opens in Read mode; Ctrl+click while editing
+  preview.addEventListener('mouseover', (e) => {
+    const a = e.target.closest('a');
+    if (!a || !preview.contains(a)) return;
+    const href = a.getAttribute('href') || '';
+    const how = isEditable() ? 'Ctrl+click to open' : 'Click to open';
+    a.title = href.startsWith('#') ? how.replace('open', 'jump to the section') : href + '\n' + how + (/^https?:/i.test(href) ? ' in your browser' : '');
+  });
+
   preview.addEventListener('click', (e) => {
     const a = e.target.closest('a');
     if (!a) return;
@@ -2240,6 +2315,8 @@
       case 'toggle-sidebar': return setSidebar(!sidebarOpen());
       case 'autosave-on': autoSave = true; autosaveAll(); return;
       case 'autosave-off': autoSave = false; return;
+      case 'ext-marks-on': preview.classList.add('ext-marks'); return;
+      case 'ext-marks-off': preview.classList.remove('ext-marks'); return;
       case 'md-shortcuts-on': mdShortcuts = true; return;
       case 'md-shortcuts-off': mdShortcuts = false; return;
       case 'find': return openFind(false);
@@ -2251,6 +2328,7 @@
     const st = await window.api.getSettings();
     showTheme(st.theme);
     mdShortcuts = st.mdShortcuts !== false;
+    preview.classList.toggle('ext-marks', st.markExternal !== false);
     autoSave = st.autoSave !== false;
     setSidebar(st.sidebarOpen, false);
     recent = st.recent;

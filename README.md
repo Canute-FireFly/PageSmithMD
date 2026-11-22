@@ -13,6 +13,7 @@ Small Electron app for Windows: view and edit Markdown files locally.
 - Table tools: with the cursor in a table (Edit/Split), a small bar adds or deletes rows and columns, aligns a column (saved as :--- / :---: / ---:) or deletes the table; Tab / Shift+Tab move between cells (Tab in the last cell adds a row), Enter moves down a row
 - Find and replace (Ctrl+F / Ctrl+H): highlights every match, match case and whole word options, Enter / Shift+Enter or F3 to step; replacing keeps formatting and works in Edit and Split mode
 - Reopen last session: the files you had open come back next time, in the same mode (File > Reopen last session on start)
+- Menu bar: drawn by the app in a larger font that follows the theme (Alt, Alt+F/E/V and arrow keys work as usual)
 - Theme: follow Windows, Light or Dark (status bar button or View > Theme), remembered between runs
 - GitHub-style rendering, code highlighting, relative images and links
 - PDF export, drag and drop, keeps a file's line endings

@@ -110,6 +110,7 @@ function createWindow(filePaths = [], restore = false) {
   });
   const id = win.webContents.id;
   state.set(id, { dirty: false, force: false, initial: initialFiles(filePaths, restore) });
+  win.setMenuBarVisibility(false); // the page draws a larger menu bar; shortcuts still go through the menu
   win.once('ready-to-show', () => win.show());
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
@@ -221,7 +222,48 @@ function buildMenu() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  broadcast('menu-changed', menuModel());
 }
+
+// ---- menu bar drawn by the page ----
+// The native Windows menu bar can't be given a larger font, so it is hidden (its shortcuts still
+// work) and the page draws its own from this description. Items are addressed by [menu, item, sub].
+const ROLE_ACCEL = {
+  undo: 'Ctrl+Z', redo: 'Ctrl+Y', cut: 'Ctrl+X', copy: 'Ctrl+C', paste: 'Ctrl+V', selectall: 'Ctrl+A',
+  zoomout: 'Ctrl+-', resetzoom: 'Ctrl+0', togglefullscreen: 'F11', toggledevtools: 'Ctrl+Shift+I',
+};
+function describe(item) {
+  if (item.type === 'separator') return { type: 'separator' };
+  const role = (item.role || '').toLowerCase();
+  let accel = item.accelerator || ROLE_ACCEL[role] || '';
+  accel = String(accel).replace(/CmdOrCtrl|CommandOrControl/g, 'Ctrl').replace(/\+=$/, '+=');
+  const d = { label: item.label.replace(/&/g, ''), accel, type: item.type, checked: !!item.checked, enabled: item.enabled !== false };
+  if (item.submenu) d.submenu = item.submenu.items.map(describe);
+  return d;
+}
+function menuModel() {
+  const m = Menu.getApplicationMenu();
+  if (!m) return [];
+  return m.items.map((top) => ({
+    label: top.label.replace(/&/g, ''),
+    key: (/&(\w)/.exec(top.label) || [])[1]?.toLowerCase() || top.label[0].toLowerCase(),
+    items: top.submenu.items.map(describe),
+  }));
+}
+ipcMain.handle('menu-model', () => menuModel());
+ipcMain.on('menu-click', (e, path) => {
+  let items = Menu.getApplicationMenu()?.items || [];
+  let item = null;
+  for (const i of path) {
+    item = items[i];
+    if (!item) return;
+    items = item.submenu ? item.submenu.items : [];
+  }
+  if (!item || item.type === 'separator' || item.submenu || item.enabled === false) return;
+  const win = BrowserWindow.fromWebContents(e.sender);
+  item.click(undefined, win, e.sender); // also runs roles (undo, copy, zoom…) and toggles checkboxes
+  e.sender.send('menu-changed', menuModel());
+});
 
 // ---- IPC ----
 const winOf = (e) => BrowserWindow.fromWebContents(e.sender);

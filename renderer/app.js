@@ -1010,6 +1010,171 @@
     placeTableBar();
   });
 
+  // ---------- menu bar ----------
+  // Drawn here (larger text, follows the theme) from the app menu; the native bar is hidden but its
+  // shortcuts still work. Menus never take focus, so the caret stays where you were typing.
+  const menubar = $('menubar');
+  let menuModel = [];
+  let openMenu = -1;     // index of the open top-level menu, or -1
+  let menuActive = false; // Alt pressed: top level highlighted for keyboard use
+  let hot = -1;          // highlighted item in the open dropdown
+  let subOpen = -1;      // item whose submenu is showing
+  let subHot = -1;
+  let menuByKey = false; // underline the access letters only when using the keyboard
+
+  function renderMenubar() {
+    menubar.textContent = '';
+    menubar.classList.toggle('alt', menuActive && menuByKey);
+    menuModel.forEach((m, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mb-top' + (i === openMenu ? ' open' : '') + (menuActive && openMenu < 0 && i === hot ? ' hot' : '');
+      const k = m.label.toLowerCase().indexOf(m.key);
+      b.innerHTML = k >= 0 ? esc(m.label.slice(0, k)) + '<u>' + esc(m.label[k]) + '</u>' + esc(m.label.slice(k + 1)) : esc(m.label);
+      // stopPropagation: the re-draw removes this button, which the "click outside" check would misread
+      b.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); menuByKey = false; openMenu === i ? closeMenus() : showMenu(i); });
+      b.addEventListener('mouseenter', () => { if (openMenu >= 0 && openMenu !== i) showMenu(i); });
+      menubar.appendChild(b);
+      if (i === openMenu) menubar.appendChild(dropdown(m.items, [i], b));
+    });
+  }
+
+  function dropdown(items, path, anchor, isSub) {
+    const box = document.createElement('div');
+    box.className = 'mb-drop' + (isSub ? ' sub' : '');
+    box.setAttribute('role', 'menu');
+    items.forEach((it, j) => {
+      if (it.type === 'separator') { const s = document.createElement('div'); s.className = 'mb-sep'; box.appendChild(s); return; }
+      const row = document.createElement('div');
+      const isHot = isSub ? j === subHot : j === hot;
+      row.className = 'mb-item' + (it.enabled ? '' : ' disabled') + (isHot ? ' hot' : '');
+      row.setAttribute('role', 'menuitem');
+      const tick = (it.type === 'checkbox' || it.type === 'radio') && it.checked ? (it.type === 'radio' ? '●' : '✓') : '';
+      row.innerHTML = `<span class="mb-check">${tick}</span><span class="mb-label">${esc(it.label)}</span>` +
+        `<span class="mb-accel">${it.submenu ? '›' : esc(it.accel || '')}</span>`;
+      row.addEventListener('mousedown', (e) => e.preventDefault());
+      row.addEventListener('mouseenter', () => {
+        // only re-draw when something changes: the new row under the pointer gets its own
+        // mouseenter, and re-drawing again would swallow a click
+        if (isSub) { if (subHot === j) return; subHot = j; } else {
+          if (hot === j) return;
+          hot = j; subOpen = it.submenu ? j : -1; subHot = -1;
+        }
+        renderMenubar();
+      });
+      row.addEventListener('click', () => activate2(path.concat(j), it));
+      box.appendChild(row);
+      if (!isSub && it.submenu && subOpen === j) {
+        row.classList.add('has-open');
+        const sub = dropdown(it.submenu, path.concat(j), row, true);
+        row.appendChild(sub);
+      }
+    });
+    if (!isSub) {
+      const r = anchor.getBoundingClientRect();
+      box.style.left = r.left + 'px';
+      box.style.top = r.bottom + 'px';
+    }
+    return box;
+  }
+
+  function activate2(path, it) {
+    if (!it || !it.enabled || it.type === 'separator') return;
+    if (it.submenu) { subOpen = path[1]; subHot = 0; renderMenubar(); return; }
+    closeMenus();
+    window.api.menuClick(path);
+  }
+
+  function showMenu(i) {
+    openMenu = i; hot = -1; subOpen = -1; subHot = -1; menuActive = true;
+    renderMenubar();
+  }
+  function closeMenus() {
+    openMenu = -1; hot = -1; subOpen = -1; subHot = -1; menuActive = false; menuByKey = false;
+    renderMenubar();
+  }
+  const selectable = (items) => items.map((it, j) => (it.type !== 'separator' && it.enabled ? j : -1)).filter((j) => j >= 0);
+  function moveHot(items, cur, dir) {
+    const s = selectable(items);
+    if (!s.length) return -1;
+    const k = s.indexOf(cur);
+    if (k < 0) return dir > 0 ? s[0] : s[s.length - 1];
+    return s[(k + dir + s.length) % s.length];
+  }
+
+  document.addEventListener('mousedown', (e) => { if (openMenu >= 0 && e.target.isConnected && !menubar.contains(e.target)) closeMenus(); });
+  window.addEventListener('blur', () => { if (openMenu >= 0 || menuActive) closeMenus(); });
+  window.addEventListener('resize', () => { if (openMenu >= 0) renderMenubar(); });
+
+  // Keyboard: Alt on its own highlights the bar; Alt+F / Alt+E / Alt+V open a menu;
+  // arrows move, Enter chooses, Esc closes
+  let altAlone = false;
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Alt') { altAlone = !e.repeat; if (openMenu >= 0 || menuActive) { e.preventDefault(); } return; }
+    altAlone = false;
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.length === 1) {
+      const i = menuModel.findIndex((m) => m.key === e.key.toLowerCase());
+      if (i >= 0) { e.preventDefault(); e.stopPropagation(); menuByKey = true; showMenu(i); return; }
+    }
+    if (openMenu < 0 && !menuActive) return;
+    const items = openMenu >= 0 ? menuModel[openMenu].items : [];
+    const inSub = subOpen >= 0 && subHot >= 0;
+    const subItems = subOpen >= 0 ? items[subOpen].submenu : null;
+    let handled = true;
+    switch (e.key) {
+      case 'Escape':
+        if (inSub) { subHot = -1; subOpen = -1; renderMenubar(); } else closeMenus();
+        break;
+      case 'ArrowDown':
+        if (openMenu < 0) { showMenu(Math.max(hot, 0)); hot = moveHot(menuModel[openMenu].items, -1, 1); renderMenubar(); break; }
+        if (inSub) subHot = moveHot(subItems, subHot, 1); else hot = moveHot(items, hot, 1);
+        renderMenubar();
+        break;
+      case 'ArrowUp':
+        if (openMenu < 0) break;
+        if (inSub) subHot = moveHot(subItems, subHot, -1); else hot = moveHot(items, hot, -1);
+        renderMenubar();
+        break;
+      case 'ArrowRight':
+        if (openMenu >= 0 && !inSub && hot >= 0 && items[hot].submenu) { subOpen = hot; subHot = moveHot(items[hot].submenu, -1, 1); renderMenubar(); break; }
+        if (openMenu < 0) { hot = (Math.max(hot, 0) + 1) % menuModel.length; renderMenubar(); break; }
+        showMenu((openMenu + 1) % menuModel.length);
+        break;
+      case 'ArrowLeft':
+        if (inSub) { subHot = -1; subOpen = -1; renderMenubar(); break; }
+        if (openMenu < 0) { hot = (Math.max(hot, 0) - 1 + menuModel.length) % menuModel.length; renderMenubar(); break; }
+        showMenu((openMenu - 1 + menuModel.length) % menuModel.length);
+        break;
+      case 'Enter':
+      case ' ':
+        if (openMenu < 0) { showMenu(Math.max(hot, 0)); break; }
+        if (inSub) activate2([openMenu, subOpen, subHot], subItems[subHot]);
+        else if (hot >= 0) activate2([openMenu, hot], items[hot]);
+        break;
+      default:
+        // a letter jumps to the first item starting with it
+        if (openMenu >= 0 && e.key.length === 1 && !e.ctrlKey) {
+          const list = inSub ? subItems : items;
+          const j = list.findIndex((it) => it.enabled && it.label && it.label[0].toLowerCase() === e.key.toLowerCase());
+          if (j >= 0) { if (inSub) subHot = j; else hot = j; renderMenubar(); break; }
+        }
+        handled = false;
+        if (menuActive && openMenu < 0) closeMenus(); // any other key: back to typing
+    }
+    if (handled) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+  window.addEventListener('keyup', (e) => {
+    if (e.key !== 'Alt' || !altAlone) return;
+    altAlone = false;
+    e.preventDefault();
+    if (openMenu >= 0 || menuActive) closeMenus();
+    else { menuActive = true; menuByKey = true; hot = 0; renderMenubar(); }
+  }, true);
+  window.addEventListener('mousedown', () => { altAlone = false; }, true);
+
+  window.api.onMenuChanged((m) => { menuModel = m; renderMenubar(); });
+  window.api.menuModel().then((m) => { menuModel = m; renderMenubar(); });
+
   // ---------- modes / files ----------
   function setMode(m) {
     if (mode !== 'read') syncFromRich();

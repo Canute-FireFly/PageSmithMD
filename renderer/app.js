@@ -79,6 +79,11 @@
     emDelimiter: '*', strongDelimiter: '**', hr: '---',
   });
   td.use(turndownPluginGfm.gfm);
+  // GFM strikethrough as ~~text~~ (the gfm plugin writes a single ~)
+  td.addRule('strike', {
+    filter: ['del', 's', 'strike'],
+    replacement: (c) => (c.trim() ? '~~' + c + '~~' : c),
+  });
   td.addRule('highlight', {
     filter: 'mark',
     replacement: (c, node) => {
@@ -345,7 +350,7 @@
     const copy = preview.cloneNode(true);
     copy.querySelectorAll('td br, th br').forEach((b) => b.remove()); // empty table cells hold a <br>
     copy.querySelectorAll('.front-matter').forEach((f) => f.remove()); // put back below, unchanged
-    let md = tidy(td.turndown(copy.innerHTML));
+    let md = tidy(td.turndown(copy.innerHTML.replace(/\u200B/g, '')));
     if (md.trim()) md = md.replace(/\s+$/, '') + '\n'; else md = '';
     if (frontMatter) md = md ? frontMatter + md : frontMatter.replace(/\n+$/, '') + '\n';
     editor.value = md;
@@ -681,7 +686,7 @@
           '<tbody><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody></table><p><br></p>');
       },
     },
-    hr: { src: () => srcBlock('---'), rich: () => exec('insertHorizontalRule') },
+    hr: { src: () => srcBlock('---'), rich: () => { exec('insertHorizontalRule'); paragraphAfterRule(); } },
     callout: { src: () => showCalloutMenu('src'), rich: () => showCalloutMenu('rich') },
     undo: { src: () => { editor.focus(); document.execCommand('undo'); }, rich: () => exec('undo') },
   };
@@ -1175,6 +1180,309 @@
   window.api.onMenuChanged((m) => { menuModel = m; renderMenubar(); });
   window.api.menuModel().then((m) => { menuModel = m; renderMenubar(); });
 
+  // ---------- Markdown shortcuts while typing (on the page, Edit / Split) ----------
+  // Typing Markdown on the page turns it into formatting straight away, like Typora / MarkText.
+  // Changes go through execCommand where possible so Ctrl+Z puts the typed characters back.
+  let mdShortcuts = true;
+  const ZWSP = '\u200B'; // lets the caret sit just outside new bold/italic/... text; removed when saving
+  const SP = '[ \u00A0]';
+
+  function caretInfo() {
+    const s = window.getSelection();
+    if (!s.rangeCount || !s.isCollapsed) return null;
+    const r = s.getRangeAt(0);
+    if (!preview.contains(r.startContainer)) return null;
+    const el = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+    if (el.closest('pre, code, .front-matter, .markdown-alert-title, td, th')) return null;
+    let block = el;
+    while (block && block !== preview && !/^(P|DIV|H[1-6]|LI|BLOCKQUOTE)$/.test(block.tagName)) block = block.parentElement;
+    if (!block || block === preview) return null;
+    const pre = document.createRange();
+    pre.setStart(block, 0);
+    pre.setEnd(r.startContainer, r.startOffset);
+    return { r, block, before: pre.toString().replace(/\u200B/g, '') };
+  }
+
+  function selectRange(start, end) {
+    const r = document.createRange();
+    r.setStart(start.node, start.offset);
+    r.setEnd(end.node, end.offset);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    return r;
+  }
+
+  // Remove the first n characters of a block (the typed "# ", "- " ...)
+  function deletePrefix(block, n) {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let first = walker.nextNode();
+    while (first && first.nodeValue.replace(/\u200B/g, '') === '') first = walker.nextNode();
+    if (!first) return;
+    let end = first, left = n, off = 0;
+    for (let t = first; t; t = walker.nextNode()) {
+      end = t;
+      if (t.nodeValue.length >= left) { off = left; break; }
+      left -= t.nodeValue.length;
+    }
+    selectRange({ node: first, offset: 0 }, { node: end, offset: off });
+    document.execCommand('delete');
+  }
+
+  // ---- line-start rules, run when a space is typed ----
+  function blockRule(info) {
+    const { block, before } = info;
+    if (block.tagName !== 'P' && !(block.tagName === 'DIV' && block.parentElement === preview)) {
+      // "[ ] " typed at the start of a bullet item makes it a task
+      if (block.tagName === 'LI' && new RegExp('^\\[([ xX]?)\\]' + SP + '$').test(before) && !block.querySelector('input')) {
+        deletePrefix(block, before.length);
+        makeTask(block, /x/i.test(before));
+        return true;
+      }
+      return false;
+    }
+    if (block.closest('blockquote, li')) {
+      // inside a quote or list item, only headings make sense
+      if (!/^#{1,6}[ \u00A0]$/.test(before)) return false;
+    }
+    let m;
+    if ((m = new RegExp('^(#{1,6})' + SP + '$').exec(before))) {
+      deletePrefix(block, before.length);
+      document.execCommand('formatBlock', false, 'h' + m[1].length);
+      return true;
+    }
+    if (new RegExp('^[-*+]' + SP + '$').test(before)) {
+      deletePrefix(block, before.length);
+      makeList(block, 'ul');
+      return true;
+    }
+    if ((m = new RegExp('^(\\d{1,9})[.)]' + SP + '$').exec(before))) {
+      deletePrefix(block, before.length);
+      makeList(block, 'ol', m[1]);
+      return true;
+    }
+    if ((m = new RegExp('^(?:[-*+]' + SP + ')?\\[([ xX]?)\\]' + SP + '$').exec(before))) {
+      // built directly: insertHTML drops the checkbox
+      deletePrefix(block, before.length);
+      const ul = document.createElement('ul');
+      const li = document.createElement('li');
+      ul.appendChild(li);
+      while (block.firstChild) li.appendChild(block.firstChild);
+      block.replaceWith(ul);
+      makeTask(li, /x/i.test(m[1]));
+      return true;
+    }
+    if (new RegExp('^>' + SP + '$').test(before)) {
+      // built directly: formatBlock puts the text straight in the quote, and Enter then can't leave it
+      deletePrefix(block, before.length);
+      const bq = document.createElement('blockquote');
+      block.replaceWith(bq);
+      bq.appendChild(block);
+      if (!block.firstChild) block.appendChild(document.createElement('br'));
+      const r = document.createRange(); r.selectNodeContents(block); r.collapse(false);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      scheduleRichSync();
+      return true;
+    }
+    return false;
+  }
+
+  // Turn a paragraph into a one-item list, built directly: Chrome's list commands can nest
+  // the list inside the paragraph, which breaks everything typed after it
+  function makeList(block, tag, start) {
+    const list = document.createElement(tag);
+    if (tag === 'ol' && start && start !== '1') list.setAttribute('start', start);
+    const li = document.createElement('li');
+    list.appendChild(li);
+    while (block.firstChild) li.appendChild(block.firstChild);
+    if (!li.textContent.replace(/[\u200B\u00A0\s]/g, '') && !li.querySelector('br,img')) li.appendChild(document.createElement('br'));
+    block.replaceWith(list);
+    const r = document.createRange(); r.selectNodeContents(li); r.collapse(false);
+    // keep the caret before a trailing <br>
+    const last = li.lastChild;
+    if (last && last.nodeName === 'BR') { r.setStartBefore(last); r.collapse(true); }
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    scheduleRichSync();
+  }
+
+  // After inserting a horizontal rule Chrome leaves the caret loose on the page (not in a
+  // paragraph); give it an empty paragraph below the rule to type into
+  function paragraphAfterRule() {
+    const s = window.getSelection();
+    if (!s.rangeCount) return;
+    const r0 = s.getRangeAt(0);
+    let hr = null;
+    if (r0.startContainer === preview) hr = preview.childNodes[r0.startOffset - 1];
+    else {
+      const el = r0.startContainer.nodeType === 1 ? r0.startContainer : r0.startContainer.parentElement;
+      hr = el.previousElementSibling;
+      if (el.tagName === 'P' && hr && hr.tagName === 'HR') return; // already in a paragraph after it
+    }
+    if (!hr || hr.nodeName !== 'HR') return;
+    let p = hr.nextElementSibling;
+    if (!p || p.tagName !== 'P' || p.textContent.trim()) {
+      p = document.createElement('p');
+      p.appendChild(document.createElement('br'));
+      hr.after(p);
+    }
+    const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
+    s.removeAllRanges(); s.addRange(r);
+    scheduleRichSync();
+  }
+
+  // Put a checkbox at the start of a list item and the caret after it
+  function makeTask(li, done) {
+    li.querySelectorAll('br').forEach((b) => { if (!b.nextSibling) b.remove(); });
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    if (done) { box.checked = true; box.setAttribute('checked', ''); }
+    const t = document.createTextNode(ZWSP);
+    li.insertBefore(t, li.firstChild);
+    li.insertBefore(box, t);
+    const r = document.createRange(); r.setStart(t, 1); r.collapse(true);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    applyCheckboxState();
+    scheduleRichSync();
+  }
+
+  // Enter in an empty list item leaves the list (the browser won't if the item holds a checkbox
+  // or an invisible caret helper), splitting the list when the item is in the middle
+  function leaveEmptyListItem() {
+    const s = window.getSelection();
+    if (!s.rangeCount || !s.isCollapsed) return false;
+    const n = s.anchorNode;
+    const el0 = n && (n.nodeType === 1 ? n : n.parentElement);
+    // an empty paragraph at the end of a quote: move it out below the quote
+    const qp = el0?.closest('p');
+    const bq = qp?.parentElement;
+    const prev = qp?.previousElementSibling;
+    if (qp && bq && (bq.tagName === 'BLOCKQUOTE' || bq.classList.contains('markdown-alert')) && preview.contains(bq) &&
+        !qp.nextElementSibling && prev && !prev.classList.contains('markdown-alert-title') &&
+        qp.textContent.replace(/[\u200B\u00A0\s]/g, '') === '') {
+      bq.after(qp);
+      const r = document.createRange(); r.setStart(qp, 0); r.collapse(true);
+      s.removeAllRanges(); s.addRange(r);
+      scheduleRichSync();
+      return true;
+    }
+    const li = el0?.closest('li');
+    if (!li || !preview.contains(li) || li.querySelector('ul, ol')) return false;
+    if (li.textContent.replace(/[\u200B\u00A0\s]/g, '') !== '') return false;
+    const list = li.parentElement;
+    const p = document.createElement('p');
+    p.appendChild(document.createElement('br'));
+    const rest = [];
+    for (let x = li.nextElementSibling; x; x = x.nextElementSibling) rest.push(x);
+    list.after(p);
+    if (rest.length) {
+      const tail = document.createElement(list.tagName);
+      rest.forEach((x) => tail.appendChild(x));
+      p.after(tail);
+    }
+    li.remove();
+    if (!list.children.length) list.remove();
+    const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
+    s.removeAllRanges(); s.addRange(r);
+    scheduleRichSync();
+    return true;
+  }
+
+  // ---- whole-line rules, run on Enter: ---, ``` ----
+  function enterRule(info) {
+    const { block, before } = info;
+    if (block.tagName !== 'P' || block.closest('blockquote, li')) return false;
+    const text = block.textContent.replace(/\u200B/g, '').trim();
+    if (before.replace(/\u200B/g, '').trim() !== text) return false; // caret must be at the end
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(text)) {
+      const r = document.createRange(); r.selectNodeContents(block);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      document.execCommand('delete');
+      document.execCommand('insertHorizontalRule');
+      paragraphAfterRule();
+      return true;
+    }
+    let m;
+    if ((m = /^(```|~~~)([\w+#.-]*)$/.exec(text))) {
+      const lang = m[2];
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      if (lang) code.className = 'language-' + lang;
+      code.appendChild(document.createElement('br'));
+      pre.appendChild(code);
+      block.replaceWith(pre);
+      if (!pre.nextElementSibling) pre.insertAdjacentHTML('afterend', '<p><br></p>');
+      const r = document.createRange(); r.setStart(code, 0); r.collapse(true);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      scheduleRichSync();
+      return true;
+    }
+    return false;
+  }
+
+  // ---- inline rules, run when the closing character is typed ----
+  const INLINE = [
+    { re: /(\*\*|__)(?=\S)([^*_]*?[^\s*_])\1$/, wrap: 'strong' },
+    { re: /~~(?=\S)([^~]*?\S)~~$/, wrap: 's', g: 1 },
+    { re: /==(?=\S)([^=]*?\S)==$/, wrap: 'mark', g: 1 },
+    { re: /(?:^|[^*\w\\])(\*)(?=[^\s*])([^*]*?[^\s*])\*$/, wrap: 'em', lead: true },
+    { re: /(?:^|[^_\w\\])(_)(?=[^\s_])([^_]*?[^\s_])_$/, wrap: 'em', lead: true },
+    { re: /(?:^|[^`])`([^`]+)`$/, wrap: 'code', g: 1, leadTick: true },
+    { re: /\[([^\]]+)\]\(([^)\s]+)\)$/, wrap: 'a' },
+  ];
+  const TRIGGERS = new Set(['*', '_', '~', '=', '`', ')']);
+
+  function inlineRule(info) {
+    const node = info.r.startContainer;
+    if (node.nodeType !== 3) return false;
+    const text = node.nodeValue.slice(0, info.r.startOffset);
+    if (node.parentElement.closest('a, code')) return false;
+    for (const rule of INLINE) {
+      const m = rule.re.exec(text);
+      if (!m) continue;
+      let start = m.index, inner, href;
+      if (rule.wrap === 'strong') inner = m[2];
+      else if (rule.wrap === 'a') { inner = m[1]; href = m[2]; }
+      else if (rule.lead) { inner = m[2]; start = m.index + m[0].indexOf(m[1] + m[2]); }
+      else if (rule.leadTick) { inner = m[1]; start = m.index + m[0].indexOf('`'); }
+      else inner = m[rule.g];
+      selectRange({ node, offset: start }, { node, offset: text.length });
+      if (rule.wrap === 'mark') {
+        // insertHTML would turn <mark> into a styled span; build it directly
+        const r = window.getSelection().getRangeAt(0);
+        r.deleteContents();
+        const mk = document.createElement('mark');
+        mk.setAttribute('data-md', '==');
+        mk.textContent = inner;
+        const after = document.createTextNode(ZWSP);
+        r.insertNode(after);
+        r.insertNode(mk);
+        const c = document.createRange(); c.setStart(after, 1); c.collapse(true);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(c);
+        scheduleRichSync();
+        return true;
+      }
+      const html = rule.wrap === 'a'
+        ? `<a href="${esc(href)}">${esc(inner)}</a>`
+        : `<${rule.wrap}>${esc(inner)}</${rule.wrap}>`;
+      document.execCommand('insertHTML', false, html + ZWSP);
+      return true;
+    }
+    return false;
+  }
+
+  preview.addEventListener('input', (e) => {
+    if (!mdShortcuts || !isEditable() || e.inputType !== 'insertText' || !e.data) return;
+    const info = caretInfo();
+    if (!info) return;
+    if (e.data === ' ' || e.data === '\u00A0') { blockRule(info); return; }
+    if (TRIGGERS.has(e.data)) inlineRule(info);
+  });
+  preview.addEventListener('keydown', (e) => {
+    if (!isEditable() || e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey) return;
+    if (leaveEmptyListItem()) { e.preventDefault(); return; }
+    if (!mdShortcuts) return;
+    const info = caretInfo();
+    if (info && enterRule(info)) e.preventDefault();
+  });
+
   // ---------- modes / files ----------
   function setMode(m) {
     if (mode !== 'read') syncFromRich();
@@ -1605,6 +1913,8 @@
       case 'export-pdf': syncFromRich(); return window.api.exportPdf(filePath);
       case 'print': return window.api.print();
       case 'toggle-sidebar': return setSidebar(!sidebarOpen());
+      case 'md-shortcuts-on': mdShortcuts = true; return;
+      case 'md-shortcuts-off': mdShortcuts = false; return;
       case 'find': return openFind(false);
       case 'replace': return openFind(true);
     }
@@ -1613,6 +1923,7 @@
   (async () => {
     const st = await window.api.getSettings();
     showTheme(st.theme);
+    mdShortcuts = st.mdShortcuts !== false;
     setSidebar(st.sidebarOpen, false);
     recent = st.recent;
     renderRecent();

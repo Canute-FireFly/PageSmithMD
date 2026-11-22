@@ -13,7 +13,7 @@ if (!app.requestSingleInstanceLock()) {
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const MAX_RECENT = 12;
 // session = the tabs open when the app last closed: [{ path, mode }], plus which one was active
-const defaults = { theme: 'system', sidebarOpen: true, recent: [], reopenSession: true, session: [], sessionActive: null };
+const defaults = { theme: 'system', sidebarOpen: true, recent: [], reopenSession: true, session: [], sessionActive: null, mdShortcuts: true };
 let settings = { ...defaults };
 try {
   settings = { ...defaults, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
@@ -194,6 +194,15 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => send('find') },
         { label: 'Replace…', accelerator: 'CmdOrCtrl+H', click: () => send('replace') },
+        { type: 'separator' },
+        {
+          label: 'Markdown shortcuts while typing', type: 'checkbox', checked: settings.mdShortcuts,
+          click: (item) => {
+            settings.mdShortcuts = item.checked;
+            saveSettings();
+            BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('cmd', item.checked ? 'md-shortcuts-on' : 'md-shortcuts-off'));
+          },
+        },
       ],
     },
     {
@@ -303,7 +312,7 @@ ipcMain.handle('save', async (e, { content, saveAs, filePath }) => {
   return target;
 });
 
-ipcMain.handle('get-settings', () => ({ theme: settings.theme, sidebarOpen: settings.sidebarOpen, recent: existingRecent() }));
+ipcMain.handle('get-settings', () => ({ theme: settings.theme, sidebarOpen: settings.sidebarOpen, recent: existingRecent(), mdShortcuts: settings.mdShortcuts }));
 ipcMain.on('set-theme', (_e, t) => { if (['system', 'light', 'dark'].includes(t)) setTheme(t); });
 ipcMain.on('set-sidebar', (_e, open) => { settings.sidebarOpen = !!open; saveSettings(); });
 ipcMain.on('remove-recent', (_e, p) => {

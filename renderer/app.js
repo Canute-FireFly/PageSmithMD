@@ -351,9 +351,91 @@
   });
 
   // Paste: keep basic formatting from other apps, but sanitised
+  // ---------- paste / drop images ----------
+  // The image is saved into an "images" folder next to the document and linked with a relative path.
+  const IMG_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/svg+xml': 'svg' };
+
+  // An image on the clipboard, unless there's text too (Word/Excel put a picture of the
+  // selection on the clipboard alongside the text; then the text is what you want)
+  function clipboardImage(dt) {
+    if (!dt) return null;
+    const file = [...dt.files].find((f) => IMG_TYPES[f.type]);
+    if (!file) return null;
+    return dt.getData('text/plain').trim() ? null : file;
+  }
+
+  async function ensureSavedForImages() {
+    if (filePath) return true;
+    $('saved').textContent = 'Save the document first — pasted images are stored next to it';
+    const ok = await save(true);
+    if (!ok) $('saved').textContent = 'Image not added: the document was not saved';
+    return ok;
+  }
+
+  // where: 'rich' (the page) or 'src' (Markdown pane). file: a File, or a path on disk (dropped file)
+  async function insertImage(where, file) {
+    let range = where === 'rich' ? saveRange() : [editor.selectionStart, editor.selectionEnd];
+    // Saving a new document re-draws the page; remember the caret as a text position to find it again
+    let textPos = null;
+    if (where === 'rich' && range && !filePath && preview.contains(range.startContainer)) {
+      const pre = document.createRange();
+      pre.setStart(preview, 0);
+      pre.setEnd(range.startContainer, range.startOffset);
+      textPos = pre.toString().length;
+    }
+    if (!(await ensureSavedForImages())) return;
+    // (the old range is live, so after the re-draw it silently points at the top of the page)
+    if (textPos != null) range = rangeAtTextPos(textPos);
+    let rel;
+    if (typeof file === 'string') rel = await window.api.saveImage(filePath, null, null, file);
+    else rel = await window.api.saveImage(filePath, new Uint8Array(await file.arrayBuffer()), IMG_TYPES[file.type]);
+    if (!rel) return;
+    if (where === 'src') {
+      editor.focus();
+      editor.setSelectionRange(range[0], range[1]);
+      srcInsert(`![](${rel})`);
+      return;
+    }
+    // saving a new document re-renders the page, which can leave the old caret position behind
+    if (range && preview.contains(range.startContainer)) restoreRange(range);
+    else {
+      const r = document.createRange();
+      r.selectNodeContents(preview); r.collapse(false);
+      preview.focus();
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+    document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`);
+    scheduleRichSync();
+  }
+
+  function rangeAtTextPos(pos) {
+    const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT);
+    let last = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      last = n;
+      if (pos <= n.nodeValue.length) {
+        const r = document.createRange(); r.setStart(n, pos); r.collapse(true); return r;
+      }
+      pos -= n.nodeValue.length;
+    }
+    const r = document.createRange();
+    if (last) r.setStart(last, last.nodeValue.length); else r.setStart(preview, 0);
+    r.collapse(true);
+    return r;
+  }
+
+  editor.addEventListener('paste', (e) => {
+    const img = clipboardImage(e.clipboardData);
+    if (!img) return;
+    e.preventDefault();
+    insertImage('src', img);
+  });
+
   preview.addEventListener('paste', (e) => {
     if (!isEditable()) return;
     e.preventDefault();
+    const img = clipboardImage(e.clipboardData);
+    if (img) { insertImage('rich', img); return; }
     const html = e.clipboardData.getData('text/html');
     const text = e.clipboardData.getData('text/plain');
     if (html) {
@@ -1066,12 +1148,21 @@
     b.addEventListener('click', () => setMode(b.dataset.mode)));
 
   window.addEventListener('dragover', (e) => e.preventDefault());
-  window.addEventListener('drop', (e) => {
+  window.addEventListener('drop', async (e) => {
     e.preventDefault();
-    for (const f of e.dataTransfer.files) {
-      const p = window.api.pathForFile(f);
-      if (p) window.api.openPath(p);
+    // Image files dropped on the page or Markdown while editing are added to the document;
+    // anything else (e.g. .md files) opens in a tab as before
+    const onSrc = mode === 'split' && editor.contains(e.target);
+    const onPage = isEditable() && preview.contains(e.target);
+    const files = [...e.dataTransfer.files].map((f) => ({ f, p: window.api.pathForFile(f) }));
+    const images = (onSrc || onPage) ? files.filter((x) => x.p && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(x.p)) : [];
+    for (const x of files) if (x.p && !images.includes(x)) window.api.openPath(x.p);
+    if (!images.length) return;
+    if (onPage) {
+      const at = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (at) { preview.focus(); const s = window.getSelection(); s.removeAllRanges(); s.addRange(at); }
     }
+    for (const x of images) await insertImage(onSrc ? 'src' : 'rich', x.p);
   });
 
 

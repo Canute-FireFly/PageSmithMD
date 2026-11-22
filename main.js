@@ -311,6 +311,41 @@ ipcMain.handle('export-pdf', async (e, filePath) => {
 
 ipcMain.on('print', (e) => e.sender.print({ printBackground: true }));
 
+// Pasted or dropped images are stored in an "images" folder next to the document.
+// Returns the path to use in the Markdown (relative, forward slashes), or null.
+const IMG_EXT = /^(png|jpe?g|gif|webp|bmp|svg)$/i;
+ipcMain.handle('save-image', async (_e, { docPath, data, ext, srcPath }) => {
+  try {
+    if (!docPath || !path.isAbsolute(docPath)) return null;
+    const dir = path.join(path.dirname(docPath), 'images');
+    let base, extension;
+    if (srcPath) {
+      extension = path.extname(srcPath).slice(1);
+      base = path.basename(srcPath, path.extname(srcPath)).replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'image';
+    } else {
+      extension = ext;
+      const d = new Date();
+      const p2 = (n) => String(n).padStart(2, '0');
+      base = `pasted-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+    }
+    if (!IMG_EXT.test(extension || '')) return null;
+    extension = extension.toLowerCase().replace('jpeg', 'jpg');
+    // An image dropped from the images folder itself is just linked, not copied again
+    if (srcPath && path.resolve(path.dirname(srcPath)).toLowerCase() === path.resolve(dir).toLowerCase()) {
+      return 'images/' + path.basename(srcPath);
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    let name = `${base}.${extension}`;
+    for (let i = 2; fs.existsSync(path.join(dir, name)); i++) name = `${base}-${i}.${extension}`;
+    if (srcPath) fs.copyFileSync(srcPath, path.join(dir, name));
+    else fs.writeFileSync(path.join(dir, name), Buffer.from(data));
+    return 'images/' + name;
+  } catch (err) {
+    dialog.showErrorBox('Cannot save image', err.message);
+    return null;
+  }
+});
+
 // ---- lifecycle ----
 app.on('second-instance', (_e, argv) => {
   const files = filesFromArgv(argv);

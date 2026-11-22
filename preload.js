@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   openLink: (href, base) => ipcRenderer.send('open-link', { href, base }),
   closeNow: () => ipcRenderer.send('close-now'),
   exportPdf: (filePath) => ipcRenderer.invoke('export-pdf', filePath),
+  saveImage: (docPath, data, ext, srcPath) => ipcRenderer.invoke('save-image', { docPath, data, ext, srcPath }),
   print: () => ipcRenderer.send('print'),
   pathForFile: (f) => webUtils.getPathForFile(f),
   onCommand: (fn) => ipcRenderer.on('cmd', (_e, c) => fn(c)),

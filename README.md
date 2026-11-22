@@ -6,6 +6,7 @@ Small Electron app for Windows: view and edit Markdown files locally.
 - Modes: Read (read-only), Edit (type on the rendered page, Word-style) and Split (Markdown source + editable page)
 - Formatting toolbar: bold, italic, strikethrough, highlight, code, headings, lists, task list, quote, callout, link, image, code block, table, rule, undo
 - Sidebar: document outline (click a heading to jump; the current section is highlighted) and recent files; hide it with the slim edge button or Ctrl+Shift+L
+- Front matter: a YAML block (`---` ... `---`) at the top is shown as a read-only panel, left out of the outline, and kept exactly as written when you edit the page; change it in Split view
 - Highlight: saved as `<mark>text</mark>` so GitHub shows it too; `==text==` (Typora/Obsidian) is also shown and kept
 - Callouts: GitHub alerts `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`; insert one with the Callout button
 - Paste images: paste a screenshot (Ctrl+V) or drop an image file while editing; it is saved in an `images` folder next to the document and linked with a relative path (a new document is saved first)

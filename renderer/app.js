@@ -186,8 +186,26 @@
   }
 
   // ---------- Markdown -> page ----------
+  // YAML front matter (--- ... --- at the very top) is kept aside exactly as written, shown as a
+  // read-only panel, and put back unchanged when the page is turned into Markdown again.
+  // frontMatter holds the block plus the blank lines after it.
+  let frontMatter = '';
+  // (a blank line straight after the opening --- means it's a horizontal rule, not front matter)
+  const FRONT_MATTER = /^---[ \t]*\n(?![ \t]*\n)([\s\S]*?\n)?(?:---|\.\.\.)[ \t]*(?:\n|$)(?:[ \t]*\n)*/;
+  function splitFrontMatter(md) {
+    const m = FRONT_MATTER.exec(md);
+    return m ? { fm: m[0], yaml: (m[1] || '').replace(/\n$/, ''), body: md.slice(m[0].length) } : { fm: '', yaml: '', body: md };
+  }
+
   function render() {
-    preview.innerHTML = DOMPurify.sanitize(marked.parse(editor.value));
+    const parts = splitFrontMatter(editor.value);
+    frontMatter = parts.fm;
+    preview.innerHTML = DOMPurify.sanitize(marked.parse(parts.body));
+    if (frontMatter) {
+      preview.insertAdjacentHTML('afterbegin',
+        '<div class="front-matter" contenteditable="false" title="Front matter: edit it in Split view (Ctrl+3)">' +
+        '<div class="fm-label">Front matter</div><pre>' + esc(parts.yaml) + '</pre></div>');
+    }
     applyAlerts(preview);
     preview.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || '';
@@ -326,8 +344,10 @@
     richPending = false;
     const copy = preview.cloneNode(true);
     copy.querySelectorAll('td br, th br').forEach((b) => b.remove()); // empty table cells hold a <br>
+    copy.querySelectorAll('.front-matter').forEach((f) => f.remove()); // put back below, unchanged
     let md = tidy(td.turndown(copy.innerHTML));
     if (md.trim()) md = md.replace(/\s+$/, '') + '\n'; else md = '';
+    if (frontMatter) md = md ? frontMatter + md : frontMatter.replace(/\n+$/, '') + '\n';
     editor.value = md;
     updateStats();
     updateTitle();
@@ -1216,7 +1236,7 @@
   function pageText() {
     const BLOCK = /^(P|LI|H[1-6]|PRE|TD|TH|BLOCKQUOTE|DIV|UL|OL|TABLE|TR)$/;
     const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title, .front-matter') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     const parts = [];
     let text = '';

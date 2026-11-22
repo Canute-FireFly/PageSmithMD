@@ -240,6 +240,17 @@ dialog input[type=text] {
 ::highlight(find-match) { background-color: rgba(255, 200, 0, .45); color: inherit; }
 ::highlight(find-current) { background-color: #ff9632; color: #000; }
 
+/* Front matter panel (read-only; edited in the Markdown pane) */
+.markdown-body .front-matter {
+  margin: 0 0 20px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--code-bg); user-select: text; cursor: default;
+}
+.markdown-body .front-matter .fm-label {
+  font: 600 11px 'Segoe UI', system-ui, sans-serif; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin-bottom: 4px;
+}
+.markdown-body .front-matter pre { margin: 0; padding: 0; background: transparent; font: 12.5px/1.5 Consolas, 'Cascadia Mono', monospace; color: var(--muted); white-space: pre-wrap; }
+
 /* Highlight */
 .markdown-body mark { background: var(--mark-bg); color: var(--mark-fg); padding: .05em .15em; border-radius: 3px; }
 
@@ -272,7 +283,7 @@ dialog input[type=text] {
 #callout-menu button:hover { background: var(--hover); }
 
 @media print {
-  #tabs, #format-bar, #find-bar, #table-tools, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }
+  #tabs, #format-bar, #find-bar, #table-tools, .front-matter, #status, #editor-pane, #sidebar, #sb-toggle { display: none !important; }
   #workspace { display: block; }
   #preview-pane { display: block !important; overflow: visible; }
   body { background: #fff; color: #000; display: block; }

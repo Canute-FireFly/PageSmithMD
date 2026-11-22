@@ -275,6 +275,13 @@ dialog input[type=text] {
 }
 .markdown-body .front-matter pre { margin: 0; padding: 0; background: transparent; font: 12.5px/1.5 Consolas, 'Cascadia Mono', monospace; color: var(--muted); white-space: pre-wrap; }
 
+/* Maths */
+.markdown-body .math-block { margin: 0 0 16px; overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.markdown-body .math-inline { padding: 0 1px; }
+body:not(.mode-read) .markdown-body .math-inline, body:not(.mode-read) .markdown-body .math-block { cursor: pointer; border-radius: 4px; }
+body:not(.mode-read) .markdown-body .math-inline:hover, body:not(.mode-read) .markdown-body .math-block:hover { background: var(--hover); }
+.markdown-body .katex-error { color: var(--caution) !important; }
+
 /* Highlight */
 .markdown-body mark { background: var(--mark-bg); color: var(--mark-fg); padding: .05em .15em; border-radius: 3px; }
 

@@ -16,6 +16,7 @@
     "@highlightjs/cdn-assets": "^11.11.1",
     "dompurify": "^3.2.6",
     "electron": "^39.0.0",
+    "katex": "^0.16.11",
     "marked": "^16.0.0",
     "turndown": "^7.2.5",
     "turndown-plugin-gfm": "^1.0.2"

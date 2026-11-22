@@ -12,6 +12,12 @@ const files = [
   ['node_modules/@highlightjs/cdn-assets/highlight.min.js', 'highlight.js'],
   ['node_modules/@highlightjs/cdn-assets/styles/github.min.css', 'hljs-light.css'],
   ['node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css', 'hljs-dark.css'],
+  ['node_modules/katex/dist/katex.min.js', 'katex.js'],
+  ['node_modules/katex/dist/katex.min.css', 'katex.css'],
 ];
 for (const [from, to] of files) fs.copyFileSync(path.join(root, from), path.join(out, to));
+// KaTeX fonts (the stylesheet looks for them in ./fonts; woff2 is all Chromium needs)
+const fontsFrom = path.join(root, 'node_modules/katex/dist/fonts');
+fs.mkdirSync(path.join(out, 'fonts'), { recursive: true });
+for (const f of fs.readdirSync(fontsFrom)) if (f.endsWith('.woff2')) fs.copyFileSync(path.join(fontsFrom, f), path.join(out, 'fonts', f));
 console.log('vendor files copied');

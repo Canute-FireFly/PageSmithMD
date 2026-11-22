@@ -49,6 +49,59 @@
     '<div class="markdown-alert markdown-alert-' + type + '" data-alert="' + type + '">' +
     '<p class="markdown-alert-title" contenteditable="false">' + alertSvg(type) + ALERTS[type].title + '</p>' + bodyHtml + '</div>';
 
+
+  // ---------- maths (KaTeX) ----------
+  // $...$ inline, $$...$$ on its own lines (or a ```math fence, as GitHub does) as a block.
+  // The TeX is kept on the element (data-tex) so it goes back into the Markdown unchanged.
+  const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  marked.use({
+    extensions: [
+      {
+        name: 'mathBlock', level: 'block',
+        start: (src) => { const m = /^[ \t]{0,3}\$\$/m.exec(src); return m ? m.index : undefined; },
+        tokenizer(src) {
+          const m = /^[ \t]{0,3}\$\$[ \t]*\n?([\s\S]+?)\n?[ \t]*\$\$[ \t]*(?:\n+|$)/.exec(src);
+          if (m) return { type: 'mathBlock', raw: m[0], text: m[1].trim() };
+        },
+        renderer: (tok) => `<div class="math-block" data-tex="${escAttr(tok.text)}"></div>\n`,
+      },
+      {
+        name: 'mathInline', level: 'inline',
+        start: (src) => { const i = src.indexOf('$'); return i < 0 ? undefined : i; },
+        tokenizer(src) {
+          // $x$: no space just inside the dollars, and no digit straight after the closing one,
+          // so prices like "$5 and $10" stay as text
+          const m = /^\$(?![\s$])((?:\\.|[^\\$\n])+?)(?<![\s\\])\$(?!\d)/.exec(src);
+          if (m) return { type: 'mathInline', raw: m[0], text: m[1] };
+        },
+        renderer: (tok) => `<span class="math-inline" data-tex="${escAttr(tok.text)}"></span>`,
+      },
+    ],
+  });
+
+  function renderMathEl(el) {
+    const tex = el.getAttribute('data-tex') || '';
+    const display = el.classList.contains('math-block');
+    try {
+      katex.render(tex, el, { displayMode: display, throwOnError: false, output: 'htmlAndMathml' });
+    } catch (_) {
+      el.textContent = tex;
+    }
+    el.contentEditable = 'false';
+    el.title = isEditable() ? 'Double-click to edit the formula' : '';
+  }
+  function applyMath(root) {
+    // ```math fences become blocks too (remembered, so they're written back as fences)
+    root.querySelectorAll('pre > code.language-math').forEach((code) => {
+      const div = document.createElement('div');
+      div.className = 'math-block';
+      div.setAttribute('data-tex', code.textContent.replace(/\n$/, ''));
+      div.setAttribute('data-fence', '1');
+      code.parentElement.replaceWith(div);
+    });
+    root.querySelectorAll('.math-inline, .math-block').forEach(renderMathEl);
+  }
+
   // Turn rendered "> [!TYPE]" quotes into callout boxes
   function applyAlerts(root) {
     root.querySelectorAll('blockquote').forEach((bq) => {
@@ -79,6 +132,21 @@
     emDelimiter: '*', strongDelimiter: '**', hr: '---',
   });
   td.use(turndownPluginGfm.gfm);
+  // Plain-text dollars that would pair up into a formula ($x$) are written as \$ so they stay
+  // text; lone ones like "$5 and $10" are left as typed
+  const tdEscape = td.escape.bind(td);
+  td.escape = (str) => tdEscape(str).replace(/\$(?![\s$])((?:\\.|[^\\$\n])+?)(?<![\s\\])\$(?!\d)/g, (_m, inner) => '\\$' + inner + '\\$');
+  td.addRule('mathInline', {
+    filter: (node) => node.nodeName === 'SPAN' && node.classList.contains('math-inline'),
+    replacement: (_c, node) => '$' + (node.getAttribute('data-tex') || '') + '$',
+  });
+  td.addRule('mathBlock', {
+    filter: (node) => node.nodeName === 'DIV' && node.classList.contains('math-block'),
+    replacement: (_c, node) => {
+      const tex = node.getAttribute('data-tex') || '';
+      return node.getAttribute('data-fence') ? '\n\n```math\n' + tex + '\n```\n\n' : '\n\n$$\n' + tex + '\n$$\n\n';
+    },
+  });
   // GFM strikethrough as ~~text~~ (the gfm plugin writes a single ~)
   td.addRule('strike', {
     filter: ['del', 's', 'strike'],
@@ -215,6 +283,7 @@
         '<div class="fm-label">Front matter</div><pre>' + esc(parts.yaml) + '</pre></div>');
     }
     applyAlerts(preview);
+    applyMath(preview);
     preview.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || '';
       img.setAttribute('data-src', src);
@@ -459,6 +528,81 @@
     insertImage('src', img);
   });
 
+  // Pasting text onto the page: Markdown in the text becomes formatting (formulas, bold, lists,
+  // headings...), as in Typora. Ctrl+Shift+V pastes the characters exactly as they are.
+  // Rich HTML (from a web page or Word) is kept as before; "HTML" that is only coloured text
+  // (VS Code, Notepad++ ...) is treated as plain text.
+  let plainPaste = false;
+  preview.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'v') plainPaste = true;
+  }, true);
+
+  function isJustStyledText(html) {
+    const box = document.createElement('div');
+    box.innerHTML = DOMPurify.sanitize(html);
+    return !box.querySelector('h1,h2,h3,h4,h5,h6,ul,ol,li,table,a,img,strong,b,em,i,u,s,del,blockquote,pre,code,hr,mark,sup,sub');
+  }
+
+  function pasteMarkdown(text) {
+    const box = document.createElement('div');
+    box.innerHTML = DOMPurify.sanitize(marked.parse(text.replace(/\r\n?/g, '\n')));
+    applyAlerts(box);
+    applyMath(box);
+    box.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src') || '';
+      img.setAttribute('data-src', src);
+      img.src = resolveImg(src);
+    });
+    box.querySelectorAll('pre code').forEach((c) => { try { hljs.highlightElement(c); } catch (_) { /* unknown language */ } });
+    const s = window.getSelection();
+    if (!s.rangeCount) return;
+    const rg = s.getRangeAt(0);
+    rg.deleteContents();
+    const blocks = [...box.children];
+    if (!blocks.length) return;
+
+    // One paragraph: goes into the current line, where the caret is
+    if (blocks.length === 1 && blocks[0].tagName === 'P') {
+      const nodes = [...blocks[0].childNodes];
+      const frag = document.createDocumentFragment();
+      nodes.forEach((n) => frag.appendChild(n));
+      const end = document.createTextNode('\u200B'); // caret lands outside any formula / bold just pasted
+      frag.appendChild(end);
+      rg.insertNode(frag);
+      const c = document.createRange(); c.setStart(end, 1); c.collapse(true);
+      s.removeAllRanges(); s.addRange(c);
+      scheduleRichSync();
+      return;
+    }
+
+    // Several blocks: split the current paragraph at the caret and put them in between
+    let block = rg.startContainer.nodeType === 1 ? rg.startContainer : rg.startContainer.parentElement;
+    while (block && block !== preview && block.parentElement !== preview) block = block.parentElement;
+    if (!block || block === preview) {
+      blocks.forEach((b) => preview.appendChild(b));
+    } else {
+      const tailRange = document.createRange();
+      tailRange.setStart(rg.startContainer, rg.startOffset);
+      tailRange.setEnd(block, block.childNodes.length);
+      const tail = tailRange.extractContents();
+      const isEmpty = (el) => !el.textContent.replace(/[\u200B\u00A0\s]/g, '') && !el.querySelector('img, .math-inline, .math-block, input');
+      let anchor = block;
+      blocks.forEach((b) => { anchor.after(b); anchor = b; });
+      const tailBlock = block.cloneNode(false);
+      tailBlock.appendChild(tail);
+      if (!isEmpty(tailBlock)) anchor.after(tailBlock);
+      if (isEmpty(block)) block.remove();
+    }
+    // caret at the end of the pasted text
+    const last = blocks[blocks.length - 1];
+    let after = last.nextElementSibling;
+    if (!after) { after = document.createElement('p'); after.appendChild(document.createElement('br')); last.after(after); }
+    const c = document.createRange(); c.setStart(after, 0); c.collapse(true);
+    s.removeAllRanges(); s.addRange(c);
+    applyCheckboxState();
+    scheduleRichSync();
+  }
+
   preview.addEventListener('paste', (e) => {
     if (!isEditable()) return;
     e.preventDefault();
@@ -466,10 +610,13 @@
     if (img) { insertImage('rich', img); return; }
     const html = e.clipboardData.getData('text/html');
     const text = e.clipboardData.getData('text/plain');
-    if (html) {
+    const plain = plainPaste;
+    plainPaste = false;
+    if (plain) { document.execCommand('insertText', false, text); return; }
+    if (html && !isJustStyledText(html)) {
       document.execCommand('insertHTML', false, DOMPurify.sanitize(html, { FORBID_ATTR: ['style', 'class', 'id'] }));
-    } else {
-      document.execCommand('insertText', false, text);
+    } else if (text) {
+      pasteMarkdown(text);
     }
   });
 
@@ -691,6 +838,7 @@
     },
     hr: { src: () => srcBlock('---'), rich: () => { exec('insertHorizontalRule'); paragraphAfterRule(); } },
     callout: { src: () => showCalloutMenu('src'), rich: () => showCalloutMenu('rich') },
+    math: { src: () => insertMathSrc(), rich: () => insertMathRich() },
     undo: { src: () => { editor.focus(); document.execCommand('undo'); }, rich: () => exec('undo') },
   };
 
@@ -714,6 +862,7 @@
     '|',
     ['link', 'Link (Ctrl+K)', svg('<path d="M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1 1M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1-1"/>')],
     ['image', 'Image', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.600"/><path d="M4 18l5-5 4 4 3-3 4 4"/>')],
+    ['math', 'Formula (maths, TeX). Double-click a formula to edit it', svg('<path d="M18 5H6l6 7-6 7h12"/>')],
     ['codeblock', 'Code block', svg('<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/><path d="M4 3h3M17 3h3M4 21h3M17 21h3" opacity=".5"/>')],
     ['table', 'Table', svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M3 15h18M9 5v14M15 5v14"/>')],
     ['hr', 'Horizontal rule', svg('<path d="M4 12h16"/>')],
@@ -1196,7 +1345,7 @@
     const r = s.getRangeAt(0);
     if (!preview.contains(r.startContainer)) return null;
     const el = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-    if (el.closest('pre, code, .front-matter, .markdown-alert-title, td, th')) return null;
+    if (el.closest('pre, code, .front-matter, .markdown-alert-title, td, th, .math-inline, .math-block')) return null;
     let block = el;
     while (block && block !== preview && !/^(P|DIV|H[1-6]|LI|BLOCKQUOTE)$/.test(block.tagName)) block = block.parentElement;
     if (!block || block === preview) return null;
@@ -1429,8 +1578,9 @@
     { re: /(?:^|[^_\w\\])(_)(?=[^\s_])([^_]*?[^\s_])_$/, wrap: 'em', lead: true },
     { re: /(?:^|[^`])`([^`]+)`$/, wrap: 'code', g: 1, leadTick: true },
     { re: /\[([^\]]+)\]\(([^)\s]+)\)$/, wrap: 'a' },
+    { re: /(?:^|[^$\\\w])(\$)(?=[^\s$])([^$]*?[^\s$\\])\$$/, wrap: 'math', lead: true },
   ];
-  const TRIGGERS = new Set(['*', '_', '~', '=', '`', ')']);
+  const TRIGGERS = new Set(['*', '_', '~', '=', '`', ')', '$']);
 
   function inlineRule(info) {
     const node = info.r.startContainer;
@@ -1447,6 +1597,11 @@
       else if (rule.leadTick) { inner = m[1]; start = m.index + m[0].indexOf('`'); }
       else inner = m[rule.g];
       selectRange({ node, offset: start }, { node, offset: text.length });
+      if (rule.wrap === 'math') {
+        placeInlineMath(window.getSelection().getRangeAt(0), inner);
+        scheduleRichSync();
+        return true;
+      }
       if (rule.wrap === 'mark') {
         // insertHTML would turn <mark> into a styled span; build it directly
         const r = window.getSelection().getRangeAt(0);
@@ -1576,6 +1731,75 @@
   }
 
   window.addEventListener('blur', () => { if (autoSave) autosaveAll(); persistRecovery(); });
+
+  // ---------- editing maths on the page ----------
+  // Double-click a formula (Edit / Split) to change its TeX; clear it to remove the formula.
+  preview.addEventListener('dblclick', async (e) => {
+    const el = e.target.closest('.math-inline, .math-block');
+    if (!el || !isEditable() || !preview.contains(el)) return;
+    e.preventDefault();
+    const r = await ask('Formula (TeX)', el.getAttribute('data-tex') || '');
+    if (!r) return;
+    if (!r[0]) { el.remove(); scheduleRichSync(); return; }
+    el.setAttribute('data-tex', r[0]);
+    renderMathEl(el);
+    scheduleRichSync();
+  });
+
+  // Toolbar: a block formula on an empty line, otherwise inline at the caret
+  async function insertMathRich() {
+    const range = saveRange();
+    const r = await ask('Formula (TeX), e.g.  E = mc^2  or  \\frac{a}{b}', '');
+    restoreRange(range);
+    if (!r || !r[0]) return;
+    const s = window.getSelection();
+    if (!s.rangeCount) return;
+    const rg = s.getRangeAt(0);
+    let block = rg.startContainer.nodeType === 1 ? rg.startContainer : rg.startContainer.parentElement;
+    while (block && block !== preview && block.parentElement !== preview) block = block.parentElement;
+    const emptyLine = block && block !== preview && block.tagName === 'P' && !block.textContent.replace(/[\u200B\u00A0\s]/g, '');
+    if (emptyLine) {
+      const div = document.createElement('div');
+      div.className = 'math-block';
+      div.setAttribute('data-tex', r[0]);
+      block.replaceWith(div);
+      renderMathEl(div);
+      let p = div.nextElementSibling;
+      if (!p || p.tagName !== 'P') { p = document.createElement('p'); p.appendChild(document.createElement('br')); div.after(p); }
+      const c = document.createRange(); c.setStart(p, 0); c.collapse(true);
+      s.removeAllRanges(); s.addRange(c);
+    } else {
+      placeInlineMath(rg, r[0]);
+    }
+    scheduleRichSync();
+  }
+
+  function placeInlineMath(rg, tex) {
+    rg.deleteContents();
+    const span = document.createElement('span');
+    span.className = 'math-inline';
+    span.setAttribute('data-tex', tex);
+    const after = document.createTextNode('\u200B');
+    rg.insertNode(after);
+    rg.insertNode(span);
+    renderMathEl(span);
+    const c = document.createRange(); c.setStart(after, 1); c.collapse(true);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(c);
+  }
+
+  function insertMathSrc() {
+    const v = editor.value;
+    const s = editor.selectionStart, e = editor.selectionEnd;
+    const ls = v.lastIndexOf('\n', s - 1) + 1;
+    let le = v.indexOf('\n', e); if (le < 0) le = v.length;
+    if (s === e && !v.slice(ls, le).trim()) {
+      editor.focus();
+      editor.setSelectionRange(ls, le);
+      srcInsert('$$\nE = mc^2\n$$', ls + 3, ls + 11);
+    } else {
+      srcWrap('$', '$', 'E = mc^2');
+    }
+  }
 
   // ---------- modes / files ----------
   function setMode(m) {
@@ -1810,7 +2034,7 @@
   function pageText() {
     const BLOCK = /^(P|LI|H[1-6]|PRE|TD|TH|BLOCKQUOTE|DIV|UL|OL|TABLE|TR)$/;
     const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title, .front-matter') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title, .front-matter, .math-inline, .math-block') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     const parts = [];
     let text = '';

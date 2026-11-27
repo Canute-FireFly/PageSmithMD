@@ -13,8 +13,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   ready-made examples to start from. Double-click a diagram to change it; clear the text to remove it.
   Saving never changes a diagram you didn't edit.
 - Right-click a diagram to save it as an SVG or PNG picture.
-- draw.io drawings saved as `.drawio.svg` / `.drawio.png` show like any picture. Right-click one to
-  open it in the draw.io desktop app (if installed), or make a new one from the Diagram dialog.
+- draw.io drawings (`.drawio.svg` / `.drawio.png`, or an SVG/PNG saved from draw.io) show like any
+  picture. Double-click or right-click one to edit it in the draw.io desktop app (if installed); it
+  updates here when saved there. The Diagram dialog can make a new drawing or insert one you have.
   Pictures changed on disk are reloaded when you come back to PageSmithMD.
 
 ## [0.9.0] - first public beta

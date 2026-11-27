@@ -625,6 +625,7 @@
     }
     document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`);
     scheduleRichSync();
+    refreshImages();
   }
 
   function rangeAtTextPos(pos) {
@@ -2046,6 +2047,7 @@
   $('mm-help').addEventListener('click', () => window.api.openLink('https://mermaid.js.org/intro/syntax-reference.html'));
   $('mm-cancel').addEventListener('click', () => mmDlg.close('cancel'));
   $('mm-drawio').addEventListener('click', () => mmDlg.close('drawio'));
+  $('mm-drawio-pick').addEventListener('click', () => mmDlg.close('drawio-pick'));
   function diagramDialog(src, isNew) {
     return new Promise((resolve) => {
       mmSrc.value = src || '';
@@ -2053,12 +2055,14 @@
       mmPrev.classList.remove('stale');
       mmErr.textContent = '';
       $('mm-drawio').hidden = !isNew;
+      $('mm-drawio-pick').hidden = !isNew;
       mmDlg.returnValue = '';
       mmDlg.addEventListener('close', () => {
         clearTimeout(mmPrevTimer);
         mmPrevSeq++;
         if (mmDlg.returnValue === 'ok') resolve(mmSrc.value.replace(/\s+$/, ''));
         else if (mmDlg.returnValue === 'drawio') resolve({ drawio: true });
+        else if (mmDlg.returnValue === 'drawio-pick') resolve({ drawioPick: true });
         else resolve(null);
       }, { once: true });
       mmDlg.showModal();
@@ -2092,6 +2096,7 @@
     const r = await diagramDialog('', true);
     restoreRange(range);
     if (r && r.drawio) return newDrawio('rich', range);
+    if (r && r.drawioPick) return pickDrawio('rich');
     if (!r || !r.trim()) return;
     const box = document.createElement('div');
     box.innerHTML = mmBlockHtml({ src: r });
@@ -2146,6 +2151,7 @@
     const r = await diagramDialog(old, !f);
     editor.focus();
     if (r && r.drawio) { editor.setSelectionRange(s0, e0); return newDrawio('src'); }
+    if (r && r.drawioPick) { editor.setSelectionRange(s0, e0); return pickDrawio('src'); }
     if (r == null) { editor.setSelectionRange(s0, e0); return; }
     if (f) {
       if (r === old) return;
@@ -2214,8 +2220,8 @@
   // ---------- draw.io drawings ----------
   // draw.io (diagrams.net) can save a drawing as foo.drawio.svg / foo.drawio.png: an ordinary
   // picture with the drawing kept inside, so it shows here like any image. If the draw.io desktop
-  // app is installed it can be opened from here to edit it; the picture refreshes when saved.
-  const isDrawio = (src) => /\.drawio\.(svg|png)$/i.test((src || '').split(/[?#]/)[0]);
+  // app is installed it can be opened from here to edit it (double-click or right-click it); the
+  // picture refreshes when saved. An SVG/PNG saved from draw.io under a plain name counts too.
   const urlToPath = (href) => {
     try {
       const u = new URL(href);
@@ -2235,9 +2241,50 @@
       p.innerHTML = `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`;
       placeBlockAtCaret(p);
     }
-    await refreshImages(); // note the blank drawing's time, so the saved drawing shows on return
-    window.api.editDrawio(dirname(filePath) + '\\' + rel.replace(/\//g, '\\'));
+    editDrawio(dirname(filePath) + '\\' + rel.replace(/\//g, '\\'));
   }
+  // Opens a drawing in draw.io, with a reminder of how to get it back here
+  async function editDrawio(p) {
+    await refreshImages(); // note the file's time now, so the saved drawing shows on return
+    if (await window.api.editDrawio(p)) {
+      drawioOpen = { path: p, time: (await window.api.fileTimes([p]))[0] };
+      $('saved').textContent = 'Opened ' + basename(p) + ' in draw.io: save there with Ctrl+S (not Save As) and it updates here';
+    }
+  }
+  // On coming back from draw.io: say whether the drawing was saved (Save As makes a separate file
+  // the document doesn't use, which is easy to do by mistake)
+  let drawioOpen = null;
+  async function backFromDrawio(e) {
+    if (!e && !drawioOpen) return;
+    await refreshImages();
+    if (!drawioOpen) return;
+    const t = (await window.api.fileTimes([drawioOpen.path]))[0];
+    const name = basename(drawioOpen.path);
+    if (t != null && t !== drawioOpen.time) {
+      $('saved').textContent = 'Updated ' + name + ' from draw.io';
+      drawioOpen.time = t;
+    } else if (e && !drawioOpen.told) {
+      drawioOpen.told = true; // (once: they may have just closed draw.io without changes)
+      $('saved').textContent = name + ' has not been saved in draw.io yet: press Ctrl+S there (Save As makes a separate file)';
+    }
+  }
+  // A drawing the user already has: copied into the images folder (unless it's already there)
+  async function pickDrawio(where) {
+    const p = await window.api.pickDrawio();
+    if (p) await insertImage(where, p);
+  }
+  async function drawioAt(target) {
+    const img = target && target.closest && target.closest('img');
+    if (!img || !preview.contains(img)) return null;
+    const p = imgPath(img);
+    if (!p || !/\.(svg|png)$/i.test(p)) return null;
+    return (await window.api.isDrawio([p]))[0] ? p : null;
+  }
+  // Double-click a draw.io picture to edit it in draw.io
+  preview.addEventListener('dblclick', async (e) => {
+    const p = await drawioAt(e.target);
+    if (p) editDrawio(p);
+  });
   // Pictures changed on disk (e.g. saved from draw.io) are reloaded when the window gets focus
   const imgVersion = new Map(); // full path (lower case) -> number added to the address to reload it
   // file time (by full path, lower case) when each picture was last seen; kept by path, not on the
@@ -2259,14 +2306,18 @@
       if (imgVersion.has(key) && img.src !== want) img.src = want;
     });
   }
-  window.addEventListener('focus', refreshImages);
+  window.addEventListener('focus', backFromDrawio);
+  // ...and every 2 seconds while a drawing is open in draw.io, so it updates with the windows side by side
+  setInterval(() => { if (drawioOpen && !document.hidden) backFromDrawio(); }, 2000);
 
   // Right-click a diagram or a draw.io picture
   preview.addEventListener('contextmenu', async (e) => {
     const mm = e.target.closest('.mermaid-block');
     const img = !mm && e.target.closest('img');
-    if (!(mm && preview.contains(mm)) && !(img && isDrawio(img.getAttribute('data-src')))) return;
-    e.preventDefault();
+    if (!(mm && preview.contains(mm)) && !img) return;
+    e.preventDefault(); // (before the await below, or the page's own menu would open)
+    const drawio = img && (await drawioAt(img));
+    if (img && !drawio) return;
     if (mm) {
       const ok = !!mm.querySelector('svg');
       const items = [];
@@ -2277,9 +2328,8 @@
       else if (c === 'svg' || c === 'png') diagramPicture(mm, c);
       return;
     }
-    const p = imgPath(img);
-    const c = await window.api.contextMenu([{ id: 'drawio', label: 'Edit in draw.io', enabled: !!p }]);
-    if (c === 'drawio' && p) window.api.editDrawio(p);
+    const c = await window.api.contextMenu([{ id: 'drawio', label: 'Edit in draw.io' }]);
+    if (c === 'drawio') editDrawio(drawio);
   });
 
   // ---------- modes / files ----------

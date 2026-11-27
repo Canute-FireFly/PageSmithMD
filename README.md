@@ -29,7 +29,7 @@ Markdown tidy underneath.
 - **Maths** with KaTeX: `$E = mc^2$` inline and `$$ … $$` blocks; double-click a formula to edit it.
 - **Diagrams** with Mermaid: flowcharts, sequence, Gantt, mind maps and more from a ```` ```mermaid ````
   block, with a dialog and live preview (toolbar **Diagram** button). Right-click a diagram to save it as
-  SVG or PNG. draw.io `.drawio.svg` / `.drawio.png` drawings show as pictures and open in draw.io to edit.
+  SVG or PNG. draw.io drawings show as pictures; double-click one to edit it in draw.io.
 - **Callouts** in GitHub's style: `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`.
 - **Highlights**, saved as `<mark>` so GitHub shows them too (`==text==` from Typora or Obsidian
   works as well).

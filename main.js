@@ -699,15 +699,55 @@ function findDrawio() {
   ].filter(Boolean);
   return places.find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } }) || null;
 }
-ipcMain.on('edit-drawio', async (e, file) => {
+// A draw.io picture: named .drawio.svg / .drawio.png, or any .svg / .png that has the drawing
+// kept inside (draw.io's "Save as" with a plain .svg name still keeps it)
+function isDrawioFile(file) {
+  try {
+    if (!/\.(svg|png)$/i.test(file) || !fs.statSync(file).isFile()) return false;
+    if (/\.drawio\.(svg|png)$/i.test(file)) return true;
+    if (/\.svg$/i.test(file)) {
+      const fd = fs.openSync(file, 'r');
+      const buf = Buffer.alloc(65536);
+      const n = fs.readSync(fd, buf, 0, buf.length, 0);
+      fs.closeSync(fd);
+      return /content="&lt;mxfile|<mxfile/.test(buf.toString('utf8', 0, n));
+    }
+    return fs.statSync(file).size < 50e6 && fs.readFileSync(file).includes('mxfile');
+  } catch (_) { return false; }
+}
+ipcMain.handle('is-drawio', (_e, files) => (Array.isArray(files) ? files : []).map((f) => isDrawioFile(path.resolve(String(f || '')))));
+// Pick a drawing to put in the document
+ipcMain.handle('pick-drawio', async (e) => {
+  const r = await dialog.showOpenDialog(winOf(e), {
+    title: 'Insert a draw.io drawing',
+    properties: ['openFile'],
+    filters: [{ name: 'draw.io drawings (SVG or PNG)', extensions: ['svg', 'png'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const f = r.filePaths[0];
+  if (isDrawioFile(f)) return f;
+  const m = await dialog.showMessageBox(winOf(e), {
+    type: 'question',
+    title: 'PageSmithMD',
+    message: 'This picture has no draw.io drawing inside it.',
+    detail: 'It can be put in the document as an ordinary picture, but it cannot be edited in draw.io.' + '\n\n' + f,
+    buttons: ['Insert as a picture', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  return m.response === 0 ? f : null;
+});
+// Opens a drawing in draw.io; true if draw.io was started
+ipcMain.handle('edit-drawio', async (e, file) => {
   const win = winOf(e);
   const target = path.resolve(String(file || ''));
-  if (!/\.drawio\.(svg|png)$/i.test(target) || !fs.existsSync(target)) return;
+  if (!isDrawioFile(target)) return false;
   const exe = findDrawio();
   if (exe) {
     try {
       require('child_process').spawn(exe, [target], { detached: true, stdio: 'ignore' }).unref();
-      return;
+      return true;
     } catch (_) { /* fall through to the message */ }
   }
   const r = await dialog.showMessageBox(win, {
@@ -715,7 +755,7 @@ ipcMain.on('edit-drawio', async (e, file) => {
     title: 'PageSmithMD',
     message: 'The draw.io app is needed to edit this drawing.',
     detail: 'draw.io is a free diagram app. Once it is installed, right-click the picture and choose ' +
-      '"Edit in draw.io" again; when you save in draw.io the picture here updates.\n\n' + target,
+      '"Edit in draw.io" again (or double-click it). Save in draw.io with Ctrl+S and the picture here updates.\n\n' + target,
     buttons: ['Get draw.io', 'Show in folder', 'Close'],
     defaultId: 0,
     cancelId: 2,
@@ -723,6 +763,7 @@ ipcMain.on('edit-drawio', async (e, file) => {
   });
   if (r.response === 0) shell.openExternal(DRAWIO_URL);
   else if (r.response === 1) shell.showItemInFolder(target);
+  return false;
 });
 // An empty drawing in the document's images folder; returns its path for the Markdown
 const EMPTY_DRAWIO = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" ' +

@@ -19,6 +19,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Right-click a diagram, drawing or picture (Edit or Split view) to delete it; Ctrl+Z brings it back.
 - The Image dialog has a Browse… button, and a "Copy the picture to the images folder" tick box (on
   by default). Untick it to link to the picture where it is.
+- When an open document is changed by another program, PageSmithMD asks whether to reload it (with a
+  warning if you have unsaved changes). A tab in the background is asked about when you next show it.
   Pictures changed on disk are reloaded when you come back to PageSmithMD.
 
 ## [0.9.0] - first public beta

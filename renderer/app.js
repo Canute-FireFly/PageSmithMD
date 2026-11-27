@@ -2434,7 +2434,80 @@
     previewPane.scrollTop = t.scroll || 0;
     renderRecent();
     markCurrentHeading();
+    if (t.outside) setTimeout(() => { if (active === t) askReload(t); }, 0);
   }
+
+  // The textarea works in \n, so normalise here and put the file's own line endings / BOM back on save
+  function fromDisk(content) {
+    const bom = content.charCodeAt(0) === 0xFEFF;
+    if (bom) content = content.slice(1);
+    const eol = content.includes('\r\n') ? '\r\n' : '\n';
+    return { content: content.replace(/\r\n/g, '\n'), eol, bom };
+  }
+
+  // ---------- documents changed by another program ----------
+  // Checked when the window gets focus, when a tab is shown and every few seconds. A changed
+  // file is only asked about if its text really differs; the open tab is asked about straight
+  // away, others when they are next shown.
+  let checkingDisk = false;
+  let savingNow = false;
+  async function checkOutsideChanges() {
+    if (checkingDisk || savingNow) return;
+    checkingDisk = true;
+    try {
+      const list = tabs.filter((t) => t.path && t.mtime != null);
+      if (!list.length) return;
+      const times = await window.api.fileTimes(list.map((t) => t.path));
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i], tm = times[i];
+        if (tm == null || Math.abs(tm - t.mtime) <= 1 || tm === t.keptMtime || t.saving || t.outside) continue;
+        const f = await window.api.readDoc(t.path);
+        if (!f || savingNow || t.saving) continue;
+        const disk = fromDisk(f.content).content;
+        if (t === active) syncFromRich();
+        if (disk === t.saved || disk === textOf(t)) {
+          // only the file's time changed, or it now holds exactly what is here: nothing to ask
+          t.mtime = f.mtime;
+          t.saved = disk;
+          if (t === active) savedText = disk;
+          t.autoPaused = false;
+          updateTitle();
+          continue;
+        }
+        t.outside = f;
+      }
+    } finally { checkingDisk = false; }
+    if (active && active.outside && !active.asking) askReload(active);
+  }
+  async function askReload(t) {
+    const f = t.outside;
+    if (!f || t.asking) return;
+    t.asking = true;
+    if (t === active) syncFromRich();
+    let yes;
+    try { yes = await window.api.askReload(nameOf(t), isDirty(t)); } finally { t.asking = false; t.outside = null; }
+    if (!yes) {
+      t.keptMtime = f.mtime; // not asked again about this version
+      if (t === active) $('saved').textContent = 'Kept this version: auto-save paused (Ctrl+S saves over the other program\'s changes)';
+      return;
+    }
+    const d = fromDisk(f.content);
+    Object.assign(t, { saved: d.content, text: d.content, eol: d.eol, bom: d.bom, mtime: f.mtime, autoPaused: false });
+    if (t === active) {
+      const keep = previewPane.scrollTop;
+      savedText = d.content;
+      editor.value = d.content;
+      richPending = false;
+      render();
+      setMode(mode);
+      previewPane.scrollTop = keep;
+      updateTitle();
+      $('saved').textContent = 'Reloaded ' + nameOf(t);
+    }
+    persistRecovery();
+  }
+  window.addEventListener('focus', checkOutsideChanges);
+  setInterval(() => { if (!document.hidden) checkOutsideChanges(); }, 3000);
 
   // file = {path, content}, or null for a blank document
   function openDoc(file) {
@@ -2442,12 +2515,7 @@
       const same = tabs.find((t) => t.path && t.path.toLowerCase() === file.path.toLowerCase());
       if (same) { activate(same); return; }
     }
-    // The textarea works in \n, so normalise here and put the file's own line endings / BOM back on save
-    let content = file ? file.content : '';
-    const bom = content.charCodeAt(0) === 0xFEFF;
-    if (bom) content = content.slice(1);
-    const eol = content.includes('\r\n') ? '\r\n' : '\n';
-    content = content.replace(/\r\n/g, '\n');
+    const { content, eol, bom } = fromDisk(file ? file.content : '');
     const t = {
       id: nextId++, path: file ? file.path : null, eol, bom, mtime: file ? file.mtime : null,
       saved: content, text: content,
@@ -2500,7 +2568,9 @@
     let out = editor.value;
     if (active.eol === '\r\n') out = out.replace(/\n/g, '\r\n');
     if (active.bom) out = '﻿' + out;
-    const res = await window.api.save(out, !!saveAs, filePath);
+    savingNow = true;
+    let res;
+    try { res = await window.api.save(out, !!saveAs, filePath); } finally { savingNow = false; }
     if (!res) return false;
     const p = res.path;
     active.mtime = res.mtime;

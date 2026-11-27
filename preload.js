@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('api', {
   setDirty: (d) => ipcRenderer.send('set-dirty', d),
   save: (content, saveAs, filePath) => ipcRenderer.invoke('save', { content, saveAs, filePath }),
   confirmSave: (name) => ipcRenderer.invoke('confirm-save', name),
+  readDoc: (p) => ipcRenderer.invoke('read-doc', p),
+  askReload: (name, dirty) => ipcRenderer.invoke('ask-reload', { name, dirty }),
   openDialog: () => ipcRenderer.invoke('open-dialog'),
   openPath: (p) => ipcRenderer.send('open-path', p),
   openLink: (href, base) => ipcRenderer.send('open-link', { href, base }),

@@ -580,6 +580,28 @@ ipcMain.handle('confirm-save', (e, name) => {
   return ['save', 'discard', 'cancel'][choice];
 });
 
+// A document changed by another program: read it again, and ask whether to reload it
+ipcMain.handle('read-doc', (_e, p) => {
+  try { return { content: fs.readFileSync(String(p), 'utf8'), mtime: mtimeOf(String(p)) }; } catch (_) { return null; }
+});
+ipcMain.handle('ask-reload', async (e, { name, dirty }) => {
+  const r = await dialog.showMessageBox(winOf(e), {
+    type: dirty ? 'warning' : 'question',
+    title: 'PageSmithMD',
+    message: `${name} was changed by another program.`,
+    detail: (dirty
+      ? 'You also have changes here that are not saved. Reloading replaces them with the version on disk.'
+      : 'Reload it to see the new version.') +
+      '\n\nIf you keep this version, auto-save stops for this file until you press Ctrl+S, ' +
+      "which saves over the other program's changes.",
+    buttons: dirty ? ['Reload and lose my changes', 'Keep my version'] : ['Reload', 'Keep this version'],
+    defaultId: dirty ? 1 : 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  return r.response === 0;
+});
+
 ipcMain.handle('open-dialog', (e) => pickAndOpen(winOf(e)));
 ipcMain.on('open-path', (e, p) => openPath(p, winOf(e)));
 ipcMain.on('close-now', (e) => {

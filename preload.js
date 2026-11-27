@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   editDrawio: (file) => ipcRenderer.invoke('edit-drawio', file),
   isDrawio: (files) => ipcRenderer.invoke('is-drawio', files),
   pickDrawio: () => ipcRenderer.invoke('pick-drawio'),
+  pickImage: (docPath) => ipcRenderer.invoke('pick-image', docPath),
   pathForFile: (f) => webUtils.getPathForFile(f),
   onCommand: (fn) => ipcRenderer.on('cmd', (_e, c) => fn(c)),
   getSettings: () => ipcRenderer.invoke('get-settings'),

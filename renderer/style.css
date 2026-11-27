@@ -177,6 +177,12 @@ dialog input[type=text] {
 #dlg-ok { background: var(--accent); border-color: var(--accent); color: #fff; }
 #dlg-extra { margin-right: auto; color: var(--caution); }
 #dlg-extra[hidden] { display: none; }
+.dlg-row { display: flex; gap: 8px; align-items: flex-start; }
+.dlg-row input[type=text] { flex: 1; min-width: 0; }
+#dlg-browse { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--toolbar); color: var(--fg); cursor: pointer; white-space: nowrap; }
+#dlg-browse[hidden], #dlg-copy-row[hidden] { display: none; }
+.dlg-check { display: flex; align-items: center; gap: 8px; font-weight: normal; margin: 2px 0 4px; cursor: pointer; }
+.dlg-check input { margin: 0; }
 #dlg-label2:empty { display: none; }
 #dlg-label2 { margin-top: 4px; }
 /* Links to websites get a small arrow (View > Mark links to websites) */

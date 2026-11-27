@@ -592,7 +592,7 @@
   }
 
   // where: 'rich' (the page) or 'src' (Markdown pane). file: a File, or a path on disk (dropped file)
-  async function insertImage(where, file) {
+  async function insertImage(where, file, alt = '') {
     let range = where === 'rich' ? saveRange() : [editor.selectionStart, editor.selectionEnd];
     // Saving a new document re-draws the page; remember the caret as a text position to find it again
     let textPos = null;
@@ -608,11 +608,14 @@
     let rel;
     if (typeof file === 'string') rel = await window.api.saveImage(filePath, null, null, file);
     else rel = await window.api.saveImage(filePath, new Uint8Array(await file.arrayBuffer()), IMG_TYPES[file.type]);
-    if (!rel) return;
+    if (!rel) {
+      if (typeof file === 'string') $('saved').textContent = 'Not added: PageSmithMD can copy PNG, JPG, GIF, WebP, BMP and SVG pictures';
+      return;
+    }
     if (where === 'src') {
       editor.focus();
       editor.setSelectionRange(range[0], range[1]);
-      srcInsert(`![](${rel})`);
+      srcInsert(`![${alt}](${rel})`);
       return;
     }
     // saving a new document re-renders the page, which can leave the old caret position behind
@@ -623,7 +626,7 @@
       preview.focus();
       const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
     }
-    document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`);
+    document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="${esc(alt)}">`);
     scheduleRichSync();
     refreshImages();
   }
@@ -759,13 +762,18 @@
 
   // ---------- dialog ----------
   const dlg = $('dlg');
-  // ask(label, value, label2, { value2, extra }) -> [value, value2], { extra: true } or null (cancelled)
+  // ask(label, value, label2, { value2, extra, browse, copy }) -> [value, value2, copy ticked],
+  // { extra: true } or null (cancelled). browse: show a Browse… button for a picture; copy: show
+  // the "Copy the picture to the images folder" tick box (ticked).
   function ask(label, value, label2, opts = {}) {
     return new Promise((resolve) => {
       $('dlg-label').textContent = label;
       const i1 = $('dlg-input'), i2 = $('dlg-input2');
       i1.value = value || '';
       i2.value = opts.value2 || '';
+      $('dlg-browse').hidden = !opts.browse;
+      $('dlg-copy-row').hidden = !opts.copy;
+      $('dlg-copy').checked = true;
       i2.style.display = label2 ? '' : 'none';
       $('dlg-label2').textContent = label2 || '';
       i2.placeholder = opts.placeholder2 || '';
@@ -775,7 +783,7 @@
       $('dlg-ok').value = 'ok';
       dlg.returnValue = '';
       dlg.addEventListener('close', () => {
-        if (dlg.returnValue === 'ok') resolve([i1.value.trim(), i2.value.trim()]);
+        if (dlg.returnValue === 'ok') resolve([i1.value.trim(), i2.value.trim(), $('dlg-copy').checked]);
         else if (dlg.returnValue === 'extra') resolve({ extra: true });
         else resolve(null);
       }, { once: true });
@@ -786,6 +794,48 @@
   }
   $('dlg-cancel').addEventListener('click', () => dlg.close('cancel'));
   $('dlg-extra').addEventListener('click', () => dlg.close('extra'));
+  $('dlg-browse').addEventListener('click', async () => {
+    const p = await window.api.pickImage(filePath);
+    if (!p) return;
+    $('dlg-input').value = p;
+    $('dlg-input2').focus();
+  });
+
+  // ---------- Image dialog ----------
+  // A picture on this computer typed or pasted as a path (Explorer's "Copy as path" adds quotes)
+  // or a file:/// address -> its full path; anything else (a web address, a relative path) -> null
+  function localPicPath(s) {
+    s = (s || '').trim().replace(/^"(.*)"$/, '$1');
+    if (/^file:/i.test(s)) return urlToPath(s);
+    return /^([a-z]:[\\/]|\\\\)/i.test(s) ? s : null;
+  }
+  // How to write a picture's full path in the Markdown: relative to the document where possible
+  function mdPicPath(abs) {
+    if (!filePath) return toFileUrl(abs);
+    const from = dirname(filePath).split(/[\\/]+/), to = abs.split(/[\\/]+/);
+    if (from[0].toLowerCase() !== to[0].toLowerCase()) return toFileUrl(abs); // another drive
+    let i = 0;
+    while (i < from.length && i < to.length - 1 && from[i].toLowerCase() === to[i].toLowerCase()) i++;
+    return [...from.slice(i).map(() => '..'), ...to.slice(i)].map((p) => (p === '..' ? p : encodeURIComponent(p))).join('/');
+  }
+  // Toolbar Image button. where: 'rich' or 'src'
+  async function imageDialog(where) {
+    const range = where === 'rich' ? saveRange() : [editor.selectionStart, editor.selectionEnd];
+    const r = await ask('Image address or path', '', 'Description (alt text)', { browse: true, copy: true });
+    const back = () => {
+      if (where === 'rich') restoreRange(range);
+      else { editor.focus(); editor.setSelectionRange(range[0], range[1]); }
+    };
+    back();
+    if (!r || !r[0]) return;
+    let [addr, alt, copy] = r;
+    if (where === 'src' && !alt) alt = editor.value.slice(range[0], range[1]);
+    const abs = localPicPath(addr);
+    if (abs && copy) return insertImage(where, abs, alt);
+    const md = abs ? mdPicPath(abs) : addr;
+    if (where === 'src') srcInsert(`![${alt}](${md})`);
+    else document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(md))}" data-src="${esc(md)}" alt="${esc(alt)}">`);
+  }
 
   // ---------- links ----------
   const isUrl = (s) => /^(https?:\/\/|mailto:|www\.)[^\s<>"]+$/i.test(s);
@@ -990,24 +1040,7 @@
       rich: () => (inside('blockquote') ? exec('outdent') : exec('formatBlock', 'blockquote')),
     },
     link: { src: () => linkSrc(), rich: () => linkRich() },
-    image: {
-      src: async () => {
-        const s = editor.selectionStart, e = editor.selectionEnd;
-        const r = await ask('Image address or path', '', 'Description (alt text)');
-        if (!r || !r[0]) return;
-        editor.focus();
-        editor.setSelectionRange(s, e);
-        srcInsert(`![${r[1] || editor.value.slice(s, e)}](${r[0]})`);
-      },
-      rich: async () => {
-        const range = saveRange();
-        const r = await ask('Image address or path', '', 'Description (alt text)');
-        restoreRange(range);
-        if (!r || !r[0]) return;
-        document.execCommand('insertHTML', false,
-          `<img src="${esc(resolveImg(r[0]))}" data-src="${esc(r[0])}" alt="${esc(r[1])}">`);
-      },
-    },
+    image: { src: () => imageDialog('src'), rich: () => imageDialog('rich') },
     codeblock: {
       src: () => {
         const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd);

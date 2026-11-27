@@ -17,6 +17,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
   picture. Double-click or right-click one to edit it in the draw.io desktop app (if installed); it
   updates here when saved there. The Diagram dialog can make a new drawing or insert one you have.
 - Right-click a diagram, drawing or picture (Edit or Split view) to delete it; Ctrl+Z brings it back.
+- The Image dialog has a Browse… button, and a "Copy the picture to the images folder" tick box (on
+  by default). Untick it to link to the picture where it is.
   Pictures changed on disk are reloaded when you come back to PageSmithMD.
 
 ## [0.9.0] - first public beta

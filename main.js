@@ -716,6 +716,19 @@ function isDrawioFile(file) {
   } catch (_) { return false; }
 }
 ipcMain.handle('is-drawio', (_e, files) => (Array.isArray(files) ? files : []).map((f) => isDrawioFile(path.resolve(String(f || '')))));
+// Pick a picture for the Image dialog (starts in the document's folder)
+ipcMain.handle('pick-image', async (e, docPath) => {
+  const r = await dialog.showOpenDialog(winOf(e), {
+    title: 'Choose a picture',
+    defaultPath: docPath && path.isAbsolute(docPath) ? path.dirname(docPath) : app.getPath('pictures'),
+    properties: ['openFile'],
+    filters: [
+      { name: 'Pictures', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  return r.canceled ? null : r.filePaths[0] || null;
+});
 // Pick a drawing to put in the document
 ipcMain.handle('pick-drawio', async (e) => {
   const r = await dialog.showOpenDialog(winOf(e), {

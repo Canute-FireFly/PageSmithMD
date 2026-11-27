@@ -5,6 +5,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-27
+
 ### Added
 - Diagrams with Mermaid: ```` ```mermaid ```` blocks are drawn as flowcharts, sequence, class, state,
   ER and Gantt charts, mind maps and more, in Read, Edit and Split view. They follow the light/dark
@@ -56,5 +58,6 @@ and versions follow [Semantic Versioning](https://semver.org/).
   off; the portable version links to the download page.
 - Windows installer (per user, no admin, .md file types, uninstall from Settings > Apps) and a portable zip.
 
-[Unreleased]: https://github.com/Canute-FireFly/PageSmithMD/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Canute-FireFly/PageSmithMD/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Canute-FireFly/PageSmithMD/releases/tag/v0.10.0
 [0.9.0]: https://github.com/Canute-FireFly/PageSmithMD/releases/tag/v0.9.0

@@ -408,6 +408,7 @@
       img.setAttribute('data-src', src);
       img.src = resolveImg(src);
     });
+    refreshImages();
     preview.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((h) => { h.id = slug(h.textContent); });
     preview.querySelectorAll('pre code').forEach((c) => {
       try { hljs.highlightElement(c); } catch (_) { /* unknown language */ }
@@ -2234,10 +2235,14 @@
       p.innerHTML = `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`;
       placeBlockAtCaret(p);
     }
+    await refreshImages(); // note the blank drawing's time, so the saved drawing shows on return
     window.api.editDrawio(dirname(filePath) + '\\' + rel.replace(/\//g, '\\'));
   }
   // Pictures changed on disk (e.g. saved from draw.io) are reloaded when the window gets focus
   const imgVersion = new Map(); // full path (lower case) -> number added to the address to reload it
+  // file time (by full path, lower case) when each picture was last seen; kept by path, not on the
+  // <img>, because the page is redrawn often and a new drawing must count from when it was inserted
+  const imgSeen = new Map();
   async function refreshImages() {
     const imgs = [...preview.querySelectorAll('img')].map((img) => [img, imgPath(img)]).filter(([, p]) => p);
     if (!imgs.length) return;
@@ -2245,12 +2250,13 @@
     imgs.forEach(([img, p], i) => {
       const t = times[i];
       if (t == null) return;
-      if (img._mtime != null && img._mtime !== t) {
-        const v = (imgVersion.get(p.toLowerCase()) || 0) + 1;
-        imgVersion.set(p.toLowerCase(), v);
-        img.src = resolveImg(img.getAttribute('data-src') || '');
-      }
-      img._mtime = t;
+      const key = p.toLowerCase();
+      const seen = imgSeen.get(key);
+      if (seen != null && seen !== t) imgVersion.set(key, (imgVersion.get(key) || 0) + 1);
+      imgSeen.set(key, t);
+      // reload any picture still showing an older copy (e.g. one redrawn since)
+      const want = resolveImg(img.getAttribute('data-src') || '');
+      if (imgVersion.has(key) && img.src !== want) img.src = want;
     });
   }
   window.addEventListener('focus', refreshImages);

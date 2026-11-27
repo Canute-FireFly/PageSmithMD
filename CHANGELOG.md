@@ -5,6 +5,24 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Diagrams with Mermaid: ```` ```mermaid ```` blocks are drawn as flowcharts, sequence, class, state,
+  ER and Gantt charts, mind maps and more, in Read, Edit and Split view. They follow the light/dark
+  theme and are drawn light for printing and PDF. A mistake in a diagram shows a small error box.
+- Diagram button on the toolbar: a dialog with the text on the left, a live preview on the right and
+  ready-made examples to start from. Double-click a diagram to change it; clear the text to remove it.
+  Saving never changes a diagram you didn't edit.
+- Right-click a diagram to save it as an SVG or PNG picture.
+- draw.io drawings (`.drawio.svg` / `.drawio.png`, or an SVG/PNG saved from draw.io) show like any
+  picture. Double-click or right-click one to edit it in the draw.io desktop app (if installed); it
+  updates here when saved there. The Diagram dialog can make a new drawing or insert one you have.
+- Right-click a diagram, drawing or picture (Edit or Split view) to delete it; Ctrl+Z brings it back.
+- The Image dialog has a Browse… button, and a "Copy the picture to the images folder" tick box (on
+  by default). Untick it to link to the picture where it is.
+- When an open document is changed by another program, PageSmithMD asks whether to reload it (with a
+  warning if you have unsaved changes). A tab in the background is asked about when you next show it.
+  Pictures changed on disk are reloaded when you come back to PageSmithMD.
+
 ## [0.9.0] - first public beta
 
 ### Reading and editing

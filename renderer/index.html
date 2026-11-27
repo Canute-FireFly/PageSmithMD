@@ -65,13 +65,38 @@
   <dialog id="dlg">
     <form method="dialog" id="dlg-form">
       <label id="dlg-label" for="dlg-input"></label>
-      <input id="dlg-input" type="text" autocomplete="off">
+      <div class="dlg-row">
+        <input id="dlg-input" type="text" autocomplete="off">
+        <button type="button" id="dlg-browse" hidden>Browse…</button>
+      </div>
       <label id="dlg-label2" for="dlg-input2"></label>
       <input id="dlg-input2" type="text" autocomplete="off">
+      <label id="dlg-copy-row" class="dlg-check" hidden title="Pictures from elsewhere on your computer are copied into the images folder next to the document, so the document and its pictures stay together"><input type="checkbox" id="dlg-copy" checked> Copy the picture to the images folder</label>
       <div class="dlg-buttons">
         <button type="button" id="dlg-extra" hidden></button>
         <button type="button" id="dlg-cancel">Cancel</button>
         <button type="submit" id="dlg-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="mm-dlg" aria-label="Diagram">
+    <form method="dialog" id="mm-form">
+      <div class="mm-head">
+        <label for="mm-template">Start from</label>
+        <select id="mm-template"></select>
+        <button type="button" id="mm-help" class="linkish" title="Opens mermaid.js.org in your browser">Mermaid syntax help ↗</button>
+      </div>
+      <div class="mm-body">
+        <textarea id="mm-src" spellcheck="false" aria-label="Diagram text (Mermaid)"></textarea>
+        <div id="mm-preview" aria-label="Preview"></div>
+      </div>
+      <div id="mm-error" role="status" aria-live="polite"></div>
+      <div class="dlg-buttons">
+        <button type="button" id="mm-drawio" title="Make a new drawing in the draw.io app instead (saved next to the document as a picture you can edit later)">New draw.io drawing…</button>
+        <button type="button" id="mm-drawio-pick" title="Put a drawing you already have (a .drawio.svg or .drawio.png, or an SVG/PNG saved from draw.io) in the document">Insert draw.io drawing…</button>
+        <button type="button" id="mm-cancel">Cancel</button>
+        <button type="submit" id="mm-ok" value="ok">OK</button>
       </div>
     </form>
   </dialog>
@@ -82,6 +107,7 @@
   <script src="vendor/turndown.js"></script>
   <script src="vendor/turndown-gfm.js"></script>
   <script src="vendor/katex.js"></script>
+  <script src="vendor/mermaid.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

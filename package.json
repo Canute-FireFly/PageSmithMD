@@ -30,6 +30,7 @@
     "electron-builder": "^25.1.8",
     "katex": "^0.16.11",
     "marked": "^16.0.0",
+    "mermaid": "^12.3.0",
     "turndown": "^7.2.5",
     "turndown-plugin-gfm": "^1.0.2"
   },

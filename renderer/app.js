@@ -102,6 +102,112 @@
     root.querySelectorAll('.math-inline, .math-block').forEach(renderMathEl);
   }
 
+  // ---------- diagrams (Mermaid) ----------
+  // A ```mermaid fence is drawn as a diagram. Its text, and the fence exactly as it was written,
+  // are kept on the element (data-mm, URI-encoded JSON so the sanitiser leaves "-->" alone), so
+  // saving writes an unchanged diagram back byte for byte.
+  //   { src: current text, orig: text as loaded, raw: the whole fence as loaded, open, close }
+  const mmGet = (el) => { try { return JSON.parse(decodeURIComponent(el.getAttribute('data-mm') || '')); } catch (_) { return { src: '' }; } };
+  const mmSet = (el, d) => el.setAttribute('data-mm', encodeURIComponent(JSON.stringify(d)));
+  const mmBlockHtml = (d) => `<div class="mermaid-block" data-mm="${encodeURIComponent(JSON.stringify(d))}"></div>\n`;
+  marked.use({
+    renderer: {
+      code(tok) {
+        if (!/^mermaid(\s|$)/i.test(tok.lang || '') || !/^\s{0,3}(`{3,}|~{3,})/.test(tok.raw)) return false;
+        const lines = tok.raw.replace(/\n+$/, '').split('\n');
+        const open = lines[0];
+        const fence = /^\s*(`{3,}|~{3,})/.exec(open)[1];
+        const last = lines[lines.length - 1];
+        const closed = lines.length > 1 && new RegExp('^\\s{0,3}\\' + fence[0] + '{' + fence.length + ',}\\s*$').test(last);
+        return mmBlockHtml({ src: tok.text, orig: tok.text, raw: lines.join('\n'), open, close: closed ? last : '' });
+      },
+    },
+  });
+  // The Markdown for a diagram: as loaded if its text wasn't changed, otherwise rebuilt with the same fence
+  function mermaidMarkdown(el) {
+    const d = mmGet(el);
+    if (d.raw != null && d.src === d.orig) return d.raw;
+    const open = d.open || '```mermaid';
+    const fence = (/^\s*(`{3,}|~{3,})/.exec(open) || [, '```'])[1];
+    const close = d.close || (/^\s*/.exec(open)[0] + fence);
+    return open + '\n' + d.src + '\n' + close;
+  }
+
+  // Drawing. Mermaid draws one diagram at a time with one global configuration, so drawings are
+  // queued; results are kept (per theme and text) so typing elsewhere doesn't redraw every diagram.
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  let mmForcedTheme = null; // 'default' while printing / exporting (paper is white)
+  const mmTheme = () => mmForcedTheme || (darkQuery.matches ? 'dark' : 'default');
+  const mmCache = new Map();
+  let mmQueue = Promise.resolve();
+  let mmSeq = 0;
+  function mermaidSvg(src, theme) {
+    const key = theme + '\n' + src;
+    let p = mmCache.get(key);
+    if (p) { mmCache.delete(key); mmCache.set(key, p); return p; }
+    p = mmQueue = mmQueue.then(async () => {
+      const id = 'psmd-mermaid-' + (++mmSeq);
+      try {
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme, suppressErrorRendering: true });
+        const { svg } = await mermaid.render(id, src);
+        return { svg };
+      } catch (err) {
+        return { error: String((err && (err.message || err.str)) || err || 'This diagram could not be drawn.') };
+      } finally {
+        for (const x of [id, 'd' + id, 'i' + id]) document.getElementById(x)?.remove(); // leftovers after an error
+      }
+    });
+    p.then((r) => { p.done = r; });
+    mmCache.set(key, p);
+    if (mmCache.size > 120) mmCache.delete(mmCache.keys().next().value);
+    return p;
+  }
+  function mermaidErrorHtml(msg) {
+    return '<div class="mermaid-error"><strong>Diagram error</strong><pre>' + esc(String(msg).trim()) + '</pre></div>';
+  }
+  // Draws the diagram in el (now if it was drawn before, otherwise when ready). Resolves when shown.
+  function renderMermaidEl(el) {
+    el.contentEditable = 'false';
+    el.title = mmTitle();
+    const src = mmGet(el).src || '';
+    const theme = mmTheme();
+    const want = theme + '\n' + src;
+    el._mmWant = want;
+    if (el._mmShown === want) return Promise.resolve();
+    if (!src.trim()) { el.innerHTML = mermaidErrorHtml('This diagram is empty.'); el._mmShown = want; return Promise.resolve(); }
+    const p = mermaidSvg(src, theme);
+    const show = (r) => {
+      if (el._mmWant !== want) return;
+      el.innerHTML = r.svg || mermaidErrorHtml(r.error);
+      el.classList.toggle('has-error', !r.svg);
+      el._mmShown = want;
+    };
+    if (p.done) { show(p.done); return Promise.resolve(); }
+    if (!el.firstChild) el.innerHTML = '<div class="mermaid-loading">Drawing diagram…</div>';
+    return p.then(show);
+  }
+  const mmTitle = () => (isEditable() ? 'Double-click to edit the diagram. Right-click to save it as a picture'
+    : 'Right-click to save the diagram as a picture');
+  const applyMermaid = (root) => Promise.all([...root.querySelectorAll('.mermaid-block')].map(renderMermaidEl));
+  // Follow the app theme (View > Theme, or Windows when that is chosen)
+  darkQuery.addEventListener('change', () => { if (!mmForcedTheme) applyMermaid(preview); });
+  // Print / PDF: the paper is white, so diagrams are drawn in the light theme for it
+  async function withLightDiagrams(fn) {
+    if (!preview.querySelector('.mermaid-block') || mmTheme() === 'default') return fn();
+    mmForcedTheme = 'default';
+    await applyMermaid(preview);
+    try { return await fn(); } finally { mmForcedTheme = null; applyMermaid(preview); }
+  }
+  // (window.print() or a print started some other way: swap in light drawings already made)
+  window.addEventListener('beforeprint', () => {
+    if (mmForcedTheme) return;
+    preview.querySelectorAll('.mermaid-block').forEach((el) => {
+      const p = mmCache.get('default\n' + (mmGet(el).src || ''));
+      if (p && p.done && p.done.svg) { el.innerHTML = p.done.svg; el._mmShown = null; }
+    });
+  });
+  window.addEventListener('afterprint', () => { if (!mmForcedTheme) applyMermaid(preview); });
+
   // Turn rendered "> [!TYPE]" quotes into callout boxes
   function applyAlerts(root) {
     root.querySelectorAll('blockquote').forEach((bq) => {
@@ -147,6 +253,15 @@
       return node.getAttribute('data-fence') ? '\n\n```math\n' + tex + '\n```\n\n' : '\n\n$$\n' + tex + '\n$$\n\n';
     },
   });
+  // Diagrams go back as their fence. tidy() would touch blank lines etc. inside it, so a
+  // placeholder is written here and swapped for the real text after tidying (see syncFromRich).
+  let keptBlocks = [];
+  td.addRule('mermaid', {
+    filter: (node) => node.nodeName === 'DIV' && node.classList.contains('mermaid-block'),
+    replacement: (_c, node) => '\n\n\u0001PSMDKEEP' + (keptBlocks.push(mermaidMarkdown(node)) - 1) + '\u0001\n\n',
+  });
+  const putBackKept = (md) => md.replace(/^([ \t>]*)\u0001PSMDKEEP(\d+)\u0001/gm, (_m, ind, i) =>
+    ind + keptBlocks[+i].split('\n').join('\n' + ind).replace(new RegExp('\\n' + ind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\n|$)', 'g'), '\n' + ind.trimEnd()));
   // GFM strikethrough as ~~text~~ (the gfm plugin writes a single ~)
   td.addRule('strike', {
     filter: ['del', 's', 'strike'],
@@ -190,7 +305,10 @@
 
   function resolveImg(src) {
     if (!filePath || /^([a-z]+:|\/\/|#)/i.test(src)) return src;
-    return new URL(src, toFileUrl(dirname(filePath)) + '/').href;
+    const href = new URL(src, toFileUrl(dirname(filePath)) + '/').href;
+    // a picture changed on disk since it was first shown gets a new address, so it is read again
+    const v = imgVersion.get((urlToPath(href) || '').toLowerCase());
+    return v ? href.replace(/[?#].*$/, '') + '?v=' + v : href;
   }
 
   function updateStats() {
@@ -284,11 +402,13 @@
     }
     applyAlerts(preview);
     applyMath(preview);
+    applyMermaid(preview);
     preview.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || '';
       img.setAttribute('data-src', src);
       img.src = resolveImg(src);
     });
+    refreshImages();
     preview.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((h) => { h.id = slug(h.textContent); });
     preview.querySelectorAll('pre code').forEach((c) => {
       try { hljs.highlightElement(c); } catch (_) { /* unknown language */ }
@@ -422,7 +542,9 @@
     const copy = preview.cloneNode(true);
     copy.querySelectorAll('td br, th br').forEach((b) => b.remove()); // empty table cells hold a <br>
     copy.querySelectorAll('.front-matter').forEach((f) => f.remove()); // put back below, unchanged
-    let md = tidy(td.turndown(copy.innerHTML.replace(/\u200B/g, '')));
+    copy.querySelectorAll('.mermaid-block').forEach((d) => { d.textContent = 'diagram'; }); // (not empty: Turndown skips empty elements)
+    keptBlocks = [];
+    let md = putBackKept(tidy(td.turndown(copy.innerHTML.replace(/\u200B/g, ''))));
     if (md.trim()) md = md.replace(/\s+$/, '') + '\n'; else md = '';
     if (frontMatter) md = md ? frontMatter + md : frontMatter.replace(/\n+$/, '') + '\n';
     editor.value = md;
@@ -470,7 +592,7 @@
   }
 
   // where: 'rich' (the page) or 'src' (Markdown pane). file: a File, or a path on disk (dropped file)
-  async function insertImage(where, file) {
+  async function insertImage(where, file, alt = '') {
     let range = where === 'rich' ? saveRange() : [editor.selectionStart, editor.selectionEnd];
     // Saving a new document re-draws the page; remember the caret as a text position to find it again
     let textPos = null;
@@ -486,11 +608,14 @@
     let rel;
     if (typeof file === 'string') rel = await window.api.saveImage(filePath, null, null, file);
     else rel = await window.api.saveImage(filePath, new Uint8Array(await file.arrayBuffer()), IMG_TYPES[file.type]);
-    if (!rel) return;
+    if (!rel) {
+      if (typeof file === 'string') $('saved').textContent = 'Not added: PageSmithMD can copy PNG, JPG, GIF, WebP, BMP and SVG pictures';
+      return;
+    }
     if (where === 'src') {
       editor.focus();
       editor.setSelectionRange(range[0], range[1]);
-      srcInsert(`![](${rel})`);
+      srcInsert(`![${alt}](${rel})`);
       return;
     }
     // saving a new document re-renders the page, which can leave the old caret position behind
@@ -501,8 +626,9 @@
       preview.focus();
       const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
     }
-    document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`);
+    document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="${esc(alt)}">`);
     scheduleRichSync();
+    refreshImages();
   }
 
   function rangeAtTextPos(pos) {
@@ -555,6 +681,7 @@
     box.innerHTML = DOMPurify.sanitize(marked.parse(text.replace(/\r\n?/g, '\n')));
     applyAlerts(box);
     applyMath(box);
+    applyMermaid(box);
     box.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || '';
       img.setAttribute('data-src', src);
@@ -592,7 +719,7 @@
       tailRange.setStart(rg.startContainer, rg.startOffset);
       tailRange.setEnd(block, block.childNodes.length);
       const tail = tailRange.extractContents();
-      const isEmpty = (el) => !el.textContent.replace(/[\u200B\u00A0\s]/g, '') && !el.querySelector('img, .math-inline, .math-block, input');
+      const isEmpty = (el) => !el.textContent.replace(/[\u200B\u00A0\s]/g, '') && !el.querySelector('img, .math-inline, .math-block, .mermaid-block, input');
       let anchor = block;
       blocks.forEach((b) => { anchor.after(b); anchor = b; });
       const tailBlock = block.cloneNode(false);
@@ -635,13 +762,18 @@
 
   // ---------- dialog ----------
   const dlg = $('dlg');
-  // ask(label, value, label2, { value2, extra }) -> [value, value2], { extra: true } or null (cancelled)
+  // ask(label, value, label2, { value2, extra, browse, copy }) -> [value, value2, copy ticked],
+  // { extra: true } or null (cancelled). browse: show a Browse… button for a picture; copy: show
+  // the "Copy the picture to the images folder" tick box (ticked).
   function ask(label, value, label2, opts = {}) {
     return new Promise((resolve) => {
       $('dlg-label').textContent = label;
       const i1 = $('dlg-input'), i2 = $('dlg-input2');
       i1.value = value || '';
       i2.value = opts.value2 || '';
+      $('dlg-browse').hidden = !opts.browse;
+      $('dlg-copy-row').hidden = !opts.copy;
+      $('dlg-copy').checked = true;
       i2.style.display = label2 ? '' : 'none';
       $('dlg-label2').textContent = label2 || '';
       i2.placeholder = opts.placeholder2 || '';
@@ -651,7 +783,7 @@
       $('dlg-ok').value = 'ok';
       dlg.returnValue = '';
       dlg.addEventListener('close', () => {
-        if (dlg.returnValue === 'ok') resolve([i1.value.trim(), i2.value.trim()]);
+        if (dlg.returnValue === 'ok') resolve([i1.value.trim(), i2.value.trim(), $('dlg-copy').checked]);
         else if (dlg.returnValue === 'extra') resolve({ extra: true });
         else resolve(null);
       }, { once: true });
@@ -662,6 +794,48 @@
   }
   $('dlg-cancel').addEventListener('click', () => dlg.close('cancel'));
   $('dlg-extra').addEventListener('click', () => dlg.close('extra'));
+  $('dlg-browse').addEventListener('click', async () => {
+    const p = await window.api.pickImage(filePath);
+    if (!p) return;
+    $('dlg-input').value = p;
+    $('dlg-input2').focus();
+  });
+
+  // ---------- Image dialog ----------
+  // A picture on this computer typed or pasted as a path (Explorer's "Copy as path" adds quotes)
+  // or a file:/// address -> its full path; anything else (a web address, a relative path) -> null
+  function localPicPath(s) {
+    s = (s || '').trim().replace(/^"(.*)"$/, '$1');
+    if (/^file:/i.test(s)) return urlToPath(s);
+    return /^([a-z]:[\\/]|\\\\)/i.test(s) ? s : null;
+  }
+  // How to write a picture's full path in the Markdown: relative to the document where possible
+  function mdPicPath(abs) {
+    if (!filePath) return toFileUrl(abs);
+    const from = dirname(filePath).split(/[\\/]+/), to = abs.split(/[\\/]+/);
+    if (from[0].toLowerCase() !== to[0].toLowerCase()) return toFileUrl(abs); // another drive
+    let i = 0;
+    while (i < from.length && i < to.length - 1 && from[i].toLowerCase() === to[i].toLowerCase()) i++;
+    return [...from.slice(i).map(() => '..'), ...to.slice(i)].map((p) => (p === '..' ? p : encodeURIComponent(p))).join('/');
+  }
+  // Toolbar Image button. where: 'rich' or 'src'
+  async function imageDialog(where) {
+    const range = where === 'rich' ? saveRange() : [editor.selectionStart, editor.selectionEnd];
+    const r = await ask('Image address or path', '', 'Description (alt text)', { browse: true, copy: true });
+    const back = () => {
+      if (where === 'rich') restoreRange(range);
+      else { editor.focus(); editor.setSelectionRange(range[0], range[1]); }
+    };
+    back();
+    if (!r || !r[0]) return;
+    let [addr, alt, copy] = r;
+    if (where === 'src' && !alt) alt = editor.value.slice(range[0], range[1]);
+    const abs = localPicPath(addr);
+    if (abs && copy) return insertImage(where, abs, alt);
+    const md = abs ? mdPicPath(abs) : addr;
+    if (where === 'src') srcInsert(`![${alt}](${md})`);
+    else document.execCommand('insertHTML', false, `<img src="${esc(resolveImg(md))}" data-src="${esc(md)}" alt="${esc(alt)}">`);
+  }
 
   // ---------- links ----------
   const isUrl = (s) => /^(https?:\/\/|mailto:|www\.)[^\s<>"]+$/i.test(s);
@@ -866,24 +1040,7 @@
       rich: () => (inside('blockquote') ? exec('outdent') : exec('formatBlock', 'blockquote')),
     },
     link: { src: () => linkSrc(), rich: () => linkRich() },
-    image: {
-      src: async () => {
-        const s = editor.selectionStart, e = editor.selectionEnd;
-        const r = await ask('Image address or path', '', 'Description (alt text)');
-        if (!r || !r[0]) return;
-        editor.focus();
-        editor.setSelectionRange(s, e);
-        srcInsert(`![${r[1] || editor.value.slice(s, e)}](${r[0]})`);
-      },
-      rich: async () => {
-        const range = saveRange();
-        const r = await ask('Image address or path', '', 'Description (alt text)');
-        restoreRange(range);
-        if (!r || !r[0]) return;
-        document.execCommand('insertHTML', false,
-          `<img src="${esc(resolveImg(r[0]))}" data-src="${esc(r[0])}" alt="${esc(r[1])}">`);
-      },
-    },
+    image: { src: () => imageDialog('src'), rich: () => imageDialog('rich') },
     codeblock: {
       src: () => {
         const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd);
@@ -906,6 +1063,7 @@
     hr: { src: () => srcBlock('---'), rich: () => { exec('insertHorizontalRule'); paragraphAfterRule(); } },
     callout: { src: () => showCalloutMenu('src'), rich: () => showCalloutMenu('rich') },
     math: { src: () => insertMathSrc(), rich: () => insertMathRich() },
+    diagram: { src: () => insertDiagramSrc(), rich: () => insertDiagramRich() },
     undo: { src: () => { editor.focus(); document.execCommand('undo'); }, rich: () => exec('undo') },
   };
 
@@ -930,6 +1088,7 @@
     ['link', 'Link (Ctrl+K)', svg('<path d="M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1 1M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1-1"/>')],
     ['image', 'Image', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.600"/><path d="M4 18l5-5 4 4 3-3 4 4"/>')],
     ['math', 'Formula (maths, TeX). Double-click a formula to edit it', svg('<path d="M18 5H6l6 7-6 7h12"/>')],
+    ['diagram', 'Diagram (flowchart, sequence, Gantt, mind map...). Double-click a diagram to edit it', svg('<rect x="3" y="3" width="7" height="5" rx="1"/><rect x="14" y="16" width="7" height="5" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><path d="M10 5.5h4M6.5 8v10.5H14"/>')],
     ['codeblock', 'Code block', svg('<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/><path d="M4 3h3M17 3h3M4 21h3M17 21h3" opacity=".5"/>')],
     ['table', 'Table', svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M3 15h18M9 5v14M15 5v14"/>')],
     ['hr', 'Horizontal rule', svg('<path d="M4 12h16"/>')],
@@ -1412,7 +1571,7 @@
     const r = s.getRangeAt(0);
     if (!preview.contains(r.startContainer)) return null;
     const el = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-    if (el.closest('pre, code, .front-matter, .markdown-alert-title, td, th, .math-inline, .math-block')) return null;
+    if (el.closest('pre, code, .front-matter, .markdown-alert-title, td, th, .math-inline, .math-block, .mermaid-block')) return null;
     let block = el;
     while (block && block !== preview && !/^(P|DIV|H[1-6]|LI|BLOCKQUOTE)$/.test(block.tagName)) block = block.parentElement;
     if (!block || block === preview) return null;
@@ -1868,6 +2027,370 @@
     }
   }
 
+  // ---------- diagrams: the dialog ----------
+  // Mermaid text on the left, a live preview on the right, any error underneath.
+  // Resolves with the text (empty = remove the diagram), { drawio: true }, or null (cancelled).
+  const MM_TEMPLATES = [
+    ['Flowchart', 'flowchart TD\n    A[Start] --> B{Is it working?}\n    B -- Yes --> C[Great]\n    B -- No --> D[Fix it]\n    D --> B'],
+    ['Sequence diagram', 'sequenceDiagram\n    participant U as User\n    participant A as App\n    U->>A: Open file\n    A-->>U: Show the page\n    U->>A: Save\n    A-->>U: Saved'],
+    ['Class diagram', 'classDiagram\n    class Document {\n        +String path\n        +String text\n        +save()\n    }\n    class Tab {\n        +bool dirty\n        +activate()\n    }\n    Tab --> Document : shows'],
+    ['State diagram', 'stateDiagram-v2\n    [*] --> Draft\n    Draft --> Review : submit\n    Review --> Draft : changes needed\n    Review --> Published : approve\n    Published --> [*]'],
+    ['Entity relationship (ER)', 'erDiagram\n    CUSTOMER ||--o{ ORDER : places\n    ORDER ||--|{ LINE_ITEM : contains\n    PRODUCT ||--o{ LINE_ITEM : "is in"'],
+    ['Gantt chart', 'gantt\n    title Project plan\n    dateFormat YYYY-MM-DD\n    section Design\n    Sketches      :a1, 2026-01-05, 7d\n    Review        :after a1, 3d\n    section Build\n    First version :b1, 2026-01-15, 14d\n    Testing       :after b1, 7d'],
+    ['Mind map', 'mindmap\n  root((Project))\n    Goals\n      Faster\n      Simpler\n    People\n      Writers\n      Readers\n    Tools\n      Markdown\n      Diagrams'],
+    ['Pie chart', 'pie title Time spent\n    "Writing" : 50\n    "Editing" : 30\n    "Meetings" : 20'],
+  ];
+  const mmDlg = $('mm-dlg');
+  const mmSrc = $('mm-src');
+  const mmPrev = $('mm-preview');
+  const mmErr = $('mm-error');
+  const mmPick = $('mm-template');
+  mmPick.innerHTML = '<option value="">Choose a type of diagram…</option>' +
+    MM_TEMPLATES.map(([name], i) => `<option value="${i}">${esc(name)}</option>`).join('');
+  let mmPrevTimer = null;
+  let mmPrevSeq = 0;
+  async function mmPreviewNow() {
+    clearTimeout(mmPrevTimer);
+    const seq = ++mmPrevSeq;
+    const src = mmSrc.value;
+    if (!src.trim()) {
+      mmPrev.innerHTML = '<div class="mm-empty">Choose a type of diagram above, or type Mermaid text on the left.<br><br>Leave it empty and press OK to remove the diagram.</div>';
+      mmErr.textContent = '';
+      return;
+    }
+    const r = await mermaidSvg(src, mmTheme());
+    if (seq !== mmPrevSeq) return;
+    if (r.svg) { mmPrev.innerHTML = r.svg; mmPrev.classList.remove('stale'); mmErr.textContent = ''; }
+    else { mmPrev.classList.add('stale'); mmErr.textContent = r.error; } // keep the last good picture, dimmed
+  }
+  mmSrc.addEventListener('input', () => { clearTimeout(mmPrevTimer); mmPrevTimer = setTimeout(mmPreviewNow, 350); });
+  mmSrc.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) { e.preventDefault(); document.execCommand('insertText', false, '    '); }
+    if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); mmDlg.close('ok'); }
+  });
+  mmPick.addEventListener('change', () => {
+    const t = MM_TEMPLATES[+mmPick.value];
+    if (!t) return;
+    mmSrc.focus();
+    mmSrc.select();
+    document.execCommand('insertText', false, t[1]); // (so Ctrl+Z brings the old text back)
+    mmPick.value = '';
+    mmPreviewNow();
+  });
+  $('mm-help').addEventListener('click', () => window.api.openLink('https://mermaid.js.org/intro/syntax-reference.html'));
+  $('mm-cancel').addEventListener('click', () => mmDlg.close('cancel'));
+  $('mm-drawio').addEventListener('click', () => mmDlg.close('drawio'));
+  $('mm-drawio-pick').addEventListener('click', () => mmDlg.close('drawio-pick'));
+  function diagramDialog(src, isNew) {
+    return new Promise((resolve) => {
+      mmSrc.value = src || '';
+      mmPrev.innerHTML = '';
+      mmPrev.classList.remove('stale');
+      mmErr.textContent = '';
+      $('mm-drawio').hidden = !isNew;
+      $('mm-drawio-pick').hidden = !isNew;
+      mmDlg.returnValue = '';
+      mmDlg.addEventListener('close', () => {
+        clearTimeout(mmPrevTimer);
+        mmPrevSeq++;
+        if (mmDlg.returnValue === 'ok') resolve(mmSrc.value.replace(/\s+$/, ''));
+        else if (mmDlg.returnValue === 'drawio') resolve({ drawio: true });
+        else if (mmDlg.returnValue === 'drawio-pick') resolve({ drawioPick: true });
+        else resolve(null);
+      }, { once: true });
+      mmDlg.showModal();
+      mmPreviewNow();
+      if (src) { mmSrc.focus(); mmSrc.setSelectionRange(0, 0); mmSrc.scrollTop = 0; } else mmPick.focus();
+    });
+  }
+
+  // Double-click a diagram (Edit / Split) to change it; clear the text to remove it
+  async function editDiagramEl(el) {
+    const d = mmGet(el);
+    const r = await diagramDialog(d.src || '', false);
+    if (r == null || typeof r !== 'string') return;
+    if (!r.trim()) { el.remove(); scheduleRichSync(); return; }
+    if (r === d.src) return;
+    d.src = r;
+    mmSet(el, d);
+    renderMermaidEl(el);
+    scheduleRichSync();
+  }
+  preview.addEventListener('dblclick', (e) => {
+    const el = e.target.closest('.mermaid-block');
+    if (!el || !isEditable() || !preview.contains(el)) return;
+    e.preventDefault();
+    editDiagramEl(el);
+  });
+
+  // Toolbar, on the page: a new diagram below the current paragraph (in place of it if empty)
+  async function insertDiagramRich() {
+    const range = saveRange();
+    const r = await diagramDialog('', true);
+    restoreRange(range);
+    if (r && r.drawio) return newDrawio('rich', range);
+    if (r && r.drawioPick) return pickDrawio('rich');
+    if (!r || !r.trim()) return;
+    const box = document.createElement('div');
+    box.innerHTML = mmBlockHtml({ src: r });
+    const div = box.firstChild;
+    placeBlockAtCaret(div);
+    renderMermaidEl(div);
+  }
+  // Puts a new block on the page below the paragraph holding the caret (in place of it if it's
+  // empty), with the caret on the line after it
+  function placeBlockAtCaret(div) {
+    const s = window.getSelection();
+    const rg = s.rangeCount ? s.getRangeAt(0) : null;
+    let block = rg ? (rg.startContainer.nodeType === 1 ? rg.startContainer : rg.startContainer.parentElement) : null;
+    while (block && block !== preview && block.parentElement !== preview) block = block.parentElement;
+    if (!block || block === preview || !preview.contains(block)) block = null;
+    const emptyLine = block && block.tagName === 'P' && !block.textContent.replace(/[\u200B\u00A0\s]/g, '') && !block.querySelector('img');
+    if (emptyLine) block.replaceWith(div);
+    else if (block) block.after(div);
+    else preview.appendChild(div);
+    let p = div.nextElementSibling;
+    if (!p || p.tagName !== 'P') { p = document.createElement('p'); p.appendChild(document.createElement('br')); div.after(p); }
+    const c = document.createRange(); c.setStart(p, 0); c.collapse(true);
+    s.removeAllRanges(); s.addRange(c);
+    scheduleRichSync();
+  }
+
+  // Toolbar, in the Markdown pane: edits the ```mermaid fence holding the caret, or adds a new one
+  function mermaidFenceAt(v, pos) {
+    const lines = v.split('\n');
+    let at = 0, open = null;
+    for (let i = 0; i < lines.length; i++) {
+      const start = at, end = at + lines[i].length;
+      at = end + 1;
+      if (!open) {
+        const m = /^\s{0,3}(`{3,}|~{3,})\s*(\S*)/.exec(lines[i]);
+        if (m) open = { fence: m[1], lang: m[2].toLowerCase(), start, bodyStart: end + 1 };
+        continue;
+      }
+      if (new RegExp('^\\s{0,3}\\' + open.fence[0] + '{' + open.fence.length + ',}\\s*$').test(lines[i])) {
+        if (open.lang === 'mermaid' && pos >= open.start && pos <= end) {
+          return { bodyStart: Math.min(open.bodyStart, start), bodyEnd: Math.max(open.bodyStart, start - 1) };
+        }
+        open = null;
+      }
+    }
+    return null;
+  }
+  async function insertDiagramSrc() {
+    const s0 = editor.selectionStart, e0 = editor.selectionEnd;
+    const f = mermaidFenceAt(editor.value, s0);
+    const old = f ? editor.value.slice(f.bodyStart, f.bodyEnd) : '';
+    const r = await diagramDialog(old, !f);
+    editor.focus();
+    if (r && r.drawio) { editor.setSelectionRange(s0, e0); return newDrawio('src'); }
+    if (r && r.drawioPick) { editor.setSelectionRange(s0, e0); return pickDrawio('src'); }
+    if (r == null) { editor.setSelectionRange(s0, e0); return; }
+    if (f) {
+      if (r === old) return;
+      if (!r.trim()) { // remove the whole fence
+        const v = editor.value;
+        const ls = v.lastIndexOf('\n', f.bodyStart - 2) + 1;
+        let le = v.indexOf('\n', f.bodyEnd + 1); le = le < 0 ? v.length : le + 1;
+        if (v[le] === '\n' && (ls === 0 || v[ls - 2] === '\n')) le++; // and one of the blank lines around it
+        editor.setSelectionRange(ls, le);
+        srcInsert('');
+        return;
+      }
+      editor.setSelectionRange(f.bodyStart, f.bodyEnd);
+      srcInsert(old ? r : r + '\n');
+      return;
+    }
+    if (!r.trim()) return;
+    // on a line of its own, with a blank line before and after
+    const v = editor.value;
+    let at = v.indexOf('\n', e0); if (at < 0) at = v.length;
+    if (!v.slice(v.lastIndexOf('\n', e0 - 1) + 1, at).trim()) at = v.lastIndexOf('\n', e0 - 1) + 1; // an empty line: use it
+    const before = v.slice(0, at);
+    const pre = !before ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+    const post = v.slice(at).startsWith('\n') || at === v.length ? '\n' : '\n\n';
+    editor.setSelectionRange(at, at);
+    srcInsert(pre + '```mermaid\n' + r + '\n```' + post);
+  }
+
+  // ---------- diagrams: save as a picture ----------
+  // Saved in the light theme (it suits documents and e-mails); PNG at twice the size, on white.
+  async function diagramPicture(el, ext) {
+    const r = await mermaidSvg(mmGet(el).src || '', 'default');
+    if (!r.svg) { $('saved').textContent = 'This diagram has an error, so it cannot be saved as a picture'; return; }
+    const svgEl = new DOMParser().parseFromString(r.svg, 'image/svg+xml').documentElement;
+    // the size it is drawn at, so the file opens at that size (Mermaid leaves width="100%")
+    const live = el.querySelector('svg');
+    const vb = (svgEl.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    let w = vb[2] || (live && live.getBoundingClientRect().width) || 800;
+    let h = vb[3] || (live && live.getBoundingClientRect().height) || 600;
+    svgEl.setAttribute('width', Math.ceil(w));
+    svgEl.setAttribute('height', Math.ceil(h));
+    svgEl.style.removeProperty('max-width');
+    const text = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(svgEl);
+    let data;
+    if (ext === 'svg') data = new TextEncoder().encode(text);
+    else {
+      const scale = 2;
+      const img = new Image();
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
+      try { await img.decode(); } catch (_) { $('saved').textContent = 'Could not make a PNG of this diagram'; return; }
+      const cv = document.createElement('canvas');
+      cv.width = Math.ceil(w * scale); cv.height = Math.ceil(h * scale);
+      const g = cv.getContext('2d');
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, cv.width, cv.height);
+      g.drawImage(img, 0, 0, cv.width, cv.height);
+      let blob;
+      try { blob = await new Promise((res) => cv.toBlob(res, 'image/png')); } catch (_) { blob = null; }
+      if (!blob) { $('saved').textContent = 'Could not make a PNG of this diagram'; return; }
+      data = new Uint8Array(await blob.arrayBuffer());
+    }
+    const saved = await window.api.saveDiagram(filePath, data, ext);
+    if (saved) $('saved').textContent = 'Saved ' + basename(saved);
+  }
+
+  // ---------- draw.io drawings ----------
+  // draw.io (diagrams.net) can save a drawing as foo.drawio.svg / foo.drawio.png: an ordinary
+  // picture with the drawing kept inside, so it shows here like any image. If the draw.io desktop
+  // app is installed it can be opened from here to edit it (double-click or right-click it); the
+  // picture refreshes when saved. An SVG/PNG saved from draw.io under a plain name counts too.
+  const urlToPath = (href) => {
+    try {
+      const u = new URL(href);
+      return u.protocol === 'file:' ? decodeURIComponent(u.pathname.replace(/^\/([A-Za-z]:)/, '$1')).replace(/\//g, '\\') : null;
+    } catch (_) { return null; }
+  };
+  const imgPath = (img) => urlToPath(img.src);
+  async function newDrawio(where, range) {
+    if (!(await ensureSavedForImages())) return;
+    const rel = await window.api.newDrawio(filePath);
+    if (!rel) return;
+    if (where === 'src') srcBlock(`![](${rel})`);
+    else {
+      if (range && preview.contains(range.startContainer)) restoreRange(range);
+      else preview.focus();
+      const p = document.createElement('p');
+      p.innerHTML = `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`;
+      placeBlockAtCaret(p);
+    }
+    editDrawio(dirname(filePath) + '\\' + rel.replace(/\//g, '\\'));
+  }
+  // Opens a drawing in draw.io, with a reminder of how to get it back here
+  async function editDrawio(p) {
+    await refreshImages(); // note the file's time now, so the saved drawing shows on return
+    if (await window.api.editDrawio(p)) {
+      drawioOpen = { path: p, time: (await window.api.fileTimes([p]))[0] };
+      $('saved').textContent = 'Opened ' + basename(p) + ' in draw.io: save there with Ctrl+S (not Save As) and it updates here';
+    }
+  }
+  // On coming back from draw.io: say whether the drawing was saved (Save As makes a separate file
+  // the document doesn't use, which is easy to do by mistake)
+  let drawioOpen = null;
+  async function backFromDrawio(e) {
+    if (!e && !drawioOpen) return;
+    await refreshImages();
+    if (!drawioOpen) return;
+    const t = (await window.api.fileTimes([drawioOpen.path]))[0];
+    const name = basename(drawioOpen.path);
+    if (t != null && t !== drawioOpen.time) {
+      $('saved').textContent = 'Updated ' + name + ' from draw.io';
+      drawioOpen.time = t;
+    } else if (e && !drawioOpen.told) {
+      drawioOpen.told = true; // (once: they may have just closed draw.io without changes)
+      $('saved').textContent = name + ' has not been saved in draw.io yet: press Ctrl+S there (Save As makes a separate file)';
+    }
+  }
+  // A drawing the user already has: copied into the images folder (unless it's already there)
+  async function pickDrawio(where) {
+    const p = await window.api.pickDrawio();
+    if (p) await insertImage(where, p);
+  }
+  async function drawioAt(target) {
+    const img = target && target.closest && target.closest('img');
+    if (!img || !preview.contains(img)) return null;
+    const p = imgPath(img);
+    if (!p || !/\.(svg|png)$/i.test(p)) return null;
+    return (await window.api.isDrawio([p]))[0] ? p : null;
+  }
+  // Double-click a draw.io picture to edit it in draw.io
+  preview.addEventListener('dblclick', async (e) => {
+    const p = await drawioAt(e.target);
+    if (p) editDrawio(p);
+  });
+  // Pictures changed on disk (e.g. saved from draw.io) are reloaded when the window gets focus
+  const imgVersion = new Map(); // full path (lower case) -> number added to the address to reload it
+  // file time (by full path, lower case) when each picture was last seen; kept by path, not on the
+  // <img>, because the page is redrawn often and a new drawing must count from when it was inserted
+  const imgSeen = new Map();
+  async function refreshImages() {
+    const imgs = [...preview.querySelectorAll('img')].map((img) => [img, imgPath(img)]).filter(([, p]) => p);
+    if (!imgs.length) return;
+    const times = await window.api.fileTimes(imgs.map(([, p]) => p));
+    imgs.forEach(([img, p], i) => {
+      const t = times[i];
+      if (t == null) return;
+      const key = p.toLowerCase();
+      const seen = imgSeen.get(key);
+      if (seen != null && seen !== t) imgVersion.set(key, (imgVersion.get(key) || 0) + 1);
+      imgSeen.set(key, t);
+      // reload any picture still showing an older copy (e.g. one redrawn since)
+      const want = resolveImg(img.getAttribute('data-src') || '');
+      if (imgVersion.has(key) && img.src !== want) img.src = want;
+    });
+  }
+  window.addEventListener('focus', backFromDrawio);
+  // ...and every 2 seconds while a drawing is open in draw.io, so it updates with the windows side by side
+  setInterval(() => { if (drawioOpen && !document.hidden) backFromDrawio(); }, 2000);
+
+  // Right-click a diagram or a draw.io picture
+  preview.addEventListener('contextmenu', async (e) => {
+    const mm = e.target.closest('.mermaid-block');
+    const img = !mm && e.target.closest('img');
+    if (!(mm && preview.contains(mm)) && !img) return;
+    e.preventDefault(); // (before the await below, or the page's own menu would open)
+    const drawio = img && (await drawioAt(img));
+    if (img && !drawio && !isEditable()) return;
+    if (mm) {
+      const ok = !!mm.querySelector('svg');
+      const items = [];
+      if (isEditable()) items.push({ id: 'edit', label: 'Edit diagram…' }, { type: 'separator' });
+      items.push({ id: 'svg', label: 'Save as SVG…', enabled: ok }, { id: 'png', label: 'Save as PNG…', enabled: ok });
+      if (isEditable()) items.push({ type: 'separator' }, { id: 'delete', label: 'Delete diagram' });
+      const c = await window.api.contextMenu(items);
+      if (c === 'edit') editDiagramEl(mm);
+      else if (c === 'svg' || c === 'png') diagramPicture(mm, c);
+      else if (c === 'delete') deleteFromPage(mm);
+      return;
+    }
+    const items = [];
+    if (drawio) items.push({ id: 'drawio', label: 'Edit in draw.io' });
+    if (drawio && isEditable()) items.push({ type: 'separator' });
+    if (isEditable()) items.push({ id: 'delete', label: drawio ? 'Delete drawing' : 'Delete picture' });
+    const c = await window.api.contextMenu(items);
+    if (c === 'drawio') editDrawio(drawio);
+    else if (c === 'delete') deleteFromPage(img);
+  });
+  // Removes a diagram or picture from the document (its file stays in the images folder).
+  // Done as an editing step so Ctrl+Z brings it back.
+  function deleteFromPage(el) {
+    if (!preview.contains(el)) return;
+    // a picture alone in its paragraph takes the paragraph with it
+    const holder = el.parentElement;
+    const alone = holder && holder !== preview && holder.tagName === 'P' &&
+      !holder.textContent.replace(/[​ \s]/g, '') && holder.querySelectorAll('img').length === 1;
+    const target = alone && (holder.previousElementSibling || holder.nextElementSibling) ? holder : el;
+    const s = window.getSelection();
+    const r = document.createRange();
+    r.selectNode(target);
+    s.removeAllRanges(); s.addRange(r);
+    preview.focus();
+    // (inserting nothing, rather than 'delete', which joins the paragraphs either side of a diagram)
+    document.execCommand('insertHTML', false, '');
+    if (preview.contains(el)) el.remove();
+    scheduleRichSync();
+  }
+
   // ---------- modes / files ----------
   function setMode(m) {
     if (mode !== 'read') syncFromRich();
@@ -1876,6 +2399,7 @@
     document.body.classList.add('mode-' + m);
     preview.contentEditable = m === 'read' ? 'false' : 'true';
     applyCheckboxState();
+    preview.querySelectorAll('.mermaid-block').forEach((el) => { el.title = mmTitle(); });
     if (m !== 'read' && !preview.firstChild) preview.innerHTML = '<p><br></p>';
     if (m === 'edit') { lastTarget = 'rich'; preview.focus(); }
     if (m === 'split') editor.focus();
@@ -1910,7 +2434,80 @@
     previewPane.scrollTop = t.scroll || 0;
     renderRecent();
     markCurrentHeading();
+    if (t.outside) setTimeout(() => { if (active === t) askReload(t); }, 0);
   }
+
+  // The textarea works in \n, so normalise here and put the file's own line endings / BOM back on save
+  function fromDisk(content) {
+    const bom = content.charCodeAt(0) === 0xFEFF;
+    if (bom) content = content.slice(1);
+    const eol = content.includes('\r\n') ? '\r\n' : '\n';
+    return { content: content.replace(/\r\n/g, '\n'), eol, bom };
+  }
+
+  // ---------- documents changed by another program ----------
+  // Checked when the window gets focus, when a tab is shown and every few seconds. A changed
+  // file is only asked about if its text really differs; the open tab is asked about straight
+  // away, others when they are next shown.
+  let checkingDisk = false;
+  let savingNow = false;
+  async function checkOutsideChanges() {
+    if (checkingDisk || savingNow) return;
+    checkingDisk = true;
+    try {
+      const list = tabs.filter((t) => t.path && t.mtime != null);
+      if (!list.length) return;
+      const times = await window.api.fileTimes(list.map((t) => t.path));
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i], tm = times[i];
+        if (tm == null || Math.abs(tm - t.mtime) <= 1 || tm === t.keptMtime || t.saving || t.outside) continue;
+        const f = await window.api.readDoc(t.path);
+        if (!f || savingNow || t.saving) continue;
+        const disk = fromDisk(f.content).content;
+        if (t === active) syncFromRich();
+        if (disk === t.saved || disk === textOf(t)) {
+          // only the file's time changed, or it now holds exactly what is here: nothing to ask
+          t.mtime = f.mtime;
+          t.saved = disk;
+          if (t === active) savedText = disk;
+          t.autoPaused = false;
+          updateTitle();
+          continue;
+        }
+        t.outside = f;
+      }
+    } finally { checkingDisk = false; }
+    if (active && active.outside && !active.asking) askReload(active);
+  }
+  async function askReload(t) {
+    const f = t.outside;
+    if (!f || t.asking) return;
+    t.asking = true;
+    if (t === active) syncFromRich();
+    let yes;
+    try { yes = await window.api.askReload(nameOf(t), isDirty(t)); } finally { t.asking = false; t.outside = null; }
+    if (!yes) {
+      t.keptMtime = f.mtime; // not asked again about this version
+      if (t === active) $('saved').textContent = 'Kept this version: auto-save paused (Ctrl+S saves over the other program\'s changes)';
+      return;
+    }
+    const d = fromDisk(f.content);
+    Object.assign(t, { saved: d.content, text: d.content, eol: d.eol, bom: d.bom, mtime: f.mtime, autoPaused: false });
+    if (t === active) {
+      const keep = previewPane.scrollTop;
+      savedText = d.content;
+      editor.value = d.content;
+      richPending = false;
+      render();
+      setMode(mode);
+      previewPane.scrollTop = keep;
+      updateTitle();
+      $('saved').textContent = 'Reloaded ' + nameOf(t);
+    }
+    persistRecovery();
+  }
+  window.addEventListener('focus', checkOutsideChanges);
+  setInterval(() => { if (!document.hidden) checkOutsideChanges(); }, 3000);
 
   // file = {path, content}, or null for a blank document
   function openDoc(file) {
@@ -1918,12 +2515,7 @@
       const same = tabs.find((t) => t.path && t.path.toLowerCase() === file.path.toLowerCase());
       if (same) { activate(same); return; }
     }
-    // The textarea works in \n, so normalise here and put the file's own line endings / BOM back on save
-    let content = file ? file.content : '';
-    const bom = content.charCodeAt(0) === 0xFEFF;
-    if (bom) content = content.slice(1);
-    const eol = content.includes('\r\n') ? '\r\n' : '\n';
-    content = content.replace(/\r\n/g, '\n');
+    const { content, eol, bom } = fromDisk(file ? file.content : '');
     const t = {
       id: nextId++, path: file ? file.path : null, eol, bom, mtime: file ? file.mtime : null,
       saved: content, text: content,
@@ -1976,7 +2568,9 @@
     let out = editor.value;
     if (active.eol === '\r\n') out = out.replace(/\n/g, '\r\n');
     if (active.bom) out = '﻿' + out;
-    const res = await window.api.save(out, !!saveAs, filePath);
+    savingNow = true;
+    let res;
+    try { res = await window.api.save(out, !!saveAs, filePath); } finally { savingNow = false; }
     if (!res) return false;
     const p = res.path;
     active.mtime = res.mtime;
@@ -2109,7 +2703,7 @@
   function pageText() {
     const BLOCK = /^(P|LI|H[1-6]|PRE|TD|TH|BLOCKQUOTE|DIV|UL|OL|TABLE|TR)$/;
     const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title, .front-matter, .math-inline, .math-block') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title, .front-matter, .math-inline, .math-block, .mermaid-block') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     const parts = [];
     let text = '';
@@ -2310,8 +2904,8 @@
       case 'mode-read': return setMode('read');
       case 'mode-edit': return setMode('edit');
       case 'mode-split': return setMode('split');
-      case 'export-pdf': syncFromRich(); return window.api.exportPdf(filePath);
-      case 'print': return window.api.print();
+      case 'export-pdf': syncFromRich(); return withLightDiagrams(() => window.api.exportPdf(filePath));
+      case 'print': return withLightDiagrams(() => window.api.print());
       case 'toggle-sidebar': return setSidebar(!sidebarOpen());
       case 'autosave-on': autoSave = true; autosaveAll(); return;
       case 'autosave-off': autoSave = false; return;

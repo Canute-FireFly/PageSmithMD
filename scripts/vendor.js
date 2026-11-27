@@ -14,6 +14,7 @@ const files = [
   ['node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css', 'hljs-dark.css'],
   ['node_modules/katex/dist/katex.min.js', 'katex.js'],
   ['node_modules/katex/dist/katex.min.css', 'katex.css'],
+  ['node_modules/mermaid/dist/mermaid.min.js', 'mermaid.js'],
 ];
 for (const [from, to] of files) fs.copyFileSync(path.join(root, from), path.join(out, to));
 // KaTeX fonts (the stylesheet looks for them in ./fonts; woff2 is all Chromium needs)

@@ -76,12 +76,33 @@
     </form>
   </dialog>
 
+  <dialog id="mm-dlg" aria-label="Diagram">
+    <form method="dialog" id="mm-form">
+      <div class="mm-head">
+        <label for="mm-template">Start from</label>
+        <select id="mm-template"></select>
+        <button type="button" id="mm-help" class="linkish" title="Opens mermaid.js.org in your browser">Mermaid syntax help ↗</button>
+      </div>
+      <div class="mm-body">
+        <textarea id="mm-src" spellcheck="false" aria-label="Diagram text (Mermaid)"></textarea>
+        <div id="mm-preview" aria-label="Preview"></div>
+      </div>
+      <div id="mm-error" role="status" aria-live="polite"></div>
+      <div class="dlg-buttons">
+        <button type="button" id="mm-drawio" title="Make a new drawing in the draw.io app instead (saved next to the document as a picture you can edit later)">New draw.io drawing…</button>
+        <button type="button" id="mm-cancel">Cancel</button>
+        <button type="submit" id="mm-ok" value="ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
   <script src="vendor/highlight.js"></script>
   <script src="vendor/turndown.js"></script>
   <script src="vendor/turndown-gfm.js"></script>
   <script src="vendor/katex.js"></script>
+  <script src="vendor/mermaid.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

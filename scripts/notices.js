@@ -14,6 +14,7 @@ const bundled = [
   { pkg: 'turndown-plugin-gfm', use: 'Tables, task lists and strikethrough for Turndown' },
   { pkg: '@highlightjs/cdn-assets', name: 'highlight.js', use: 'Code highlighting' },
   { pkg: 'katex', use: 'Maths typesetting (including its fonts)' },
+  { pkg: 'mermaid', use: 'Diagrams (flowcharts, sequence, Gantt and more)' },
 ];
 
 // Plus every runtime dependency packed into the app (electron-updater and what it uses)

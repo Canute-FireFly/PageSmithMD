@@ -102,6 +102,112 @@
     root.querySelectorAll('.math-inline, .math-block').forEach(renderMathEl);
   }
 
+  // ---------- diagrams (Mermaid) ----------
+  // A ```mermaid fence is drawn as a diagram. Its text, and the fence exactly as it was written,
+  // are kept on the element (data-mm, URI-encoded JSON so the sanitiser leaves "-->" alone), so
+  // saving writes an unchanged diagram back byte for byte.
+  //   { src: current text, orig: text as loaded, raw: the whole fence as loaded, open, close }
+  const mmGet = (el) => { try { return JSON.parse(decodeURIComponent(el.getAttribute('data-mm') || '')); } catch (_) { return { src: '' }; } };
+  const mmSet = (el, d) => el.setAttribute('data-mm', encodeURIComponent(JSON.stringify(d)));
+  const mmBlockHtml = (d) => `<div class="mermaid-block" data-mm="${encodeURIComponent(JSON.stringify(d))}"></div>\n`;
+  marked.use({
+    renderer: {
+      code(tok) {
+        if (!/^mermaid(\s|$)/i.test(tok.lang || '') || !/^\s{0,3}(`{3,}|~{3,})/.test(tok.raw)) return false;
+        const lines = tok.raw.replace(/\n+$/, '').split('\n');
+        const open = lines[0];
+        const fence = /^\s*(`{3,}|~{3,})/.exec(open)[1];
+        const last = lines[lines.length - 1];
+        const closed = lines.length > 1 && new RegExp('^\\s{0,3}\\' + fence[0] + '{' + fence.length + ',}\\s*$').test(last);
+        return mmBlockHtml({ src: tok.text, orig: tok.text, raw: lines.join('\n'), open, close: closed ? last : '' });
+      },
+    },
+  });
+  // The Markdown for a diagram: as loaded if its text wasn't changed, otherwise rebuilt with the same fence
+  function mermaidMarkdown(el) {
+    const d = mmGet(el);
+    if (d.raw != null && d.src === d.orig) return d.raw;
+    const open = d.open || '```mermaid';
+    const fence = (/^\s*(`{3,}|~{3,})/.exec(open) || [, '```'])[1];
+    const close = d.close || (/^\s*/.exec(open)[0] + fence);
+    return open + '\n' + d.src + '\n' + close;
+  }
+
+  // Drawing. Mermaid draws one diagram at a time with one global configuration, so drawings are
+  // queued; results are kept (per theme and text) so typing elsewhere doesn't redraw every diagram.
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  let mmForcedTheme = null; // 'default' while printing / exporting (paper is white)
+  const mmTheme = () => mmForcedTheme || (darkQuery.matches ? 'dark' : 'default');
+  const mmCache = new Map();
+  let mmQueue = Promise.resolve();
+  let mmSeq = 0;
+  function mermaidSvg(src, theme) {
+    const key = theme + '\n' + src;
+    let p = mmCache.get(key);
+    if (p) { mmCache.delete(key); mmCache.set(key, p); return p; }
+    p = mmQueue = mmQueue.then(async () => {
+      const id = 'psmd-mermaid-' + (++mmSeq);
+      try {
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme, suppressErrorRendering: true });
+        const { svg } = await mermaid.render(id, src);
+        return { svg };
+      } catch (err) {
+        return { error: String((err && (err.message || err.str)) || err || 'This diagram could not be drawn.') };
+      } finally {
+        for (const x of [id, 'd' + id, 'i' + id]) document.getElementById(x)?.remove(); // leftovers after an error
+      }
+    });
+    p.then((r) => { p.done = r; });
+    mmCache.set(key, p);
+    if (mmCache.size > 120) mmCache.delete(mmCache.keys().next().value);
+    return p;
+  }
+  function mermaidErrorHtml(msg) {
+    return '<div class="mermaid-error"><strong>Diagram error</strong><pre>' + esc(String(msg).trim()) + '</pre></div>';
+  }
+  // Draws the diagram in el (now if it was drawn before, otherwise when ready). Resolves when shown.
+  function renderMermaidEl(el) {
+    el.contentEditable = 'false';
+    el.title = mmTitle();
+    const src = mmGet(el).src || '';
+    const theme = mmTheme();
+    const want = theme + '\n' + src;
+    el._mmWant = want;
+    if (el._mmShown === want) return Promise.resolve();
+    if (!src.trim()) { el.innerHTML = mermaidErrorHtml('This diagram is empty.'); el._mmShown = want; return Promise.resolve(); }
+    const p = mermaidSvg(src, theme);
+    const show = (r) => {
+      if (el._mmWant !== want) return;
+      el.innerHTML = r.svg || mermaidErrorHtml(r.error);
+      el.classList.toggle('has-error', !r.svg);
+      el._mmShown = want;
+    };
+    if (p.done) { show(p.done); return Promise.resolve(); }
+    if (!el.firstChild) el.innerHTML = '<div class="mermaid-loading">Drawing diagram…</div>';
+    return p.then(show);
+  }
+  const mmTitle = () => (isEditable() ? 'Double-click to edit the diagram. Right-click to save it as a picture'
+    : 'Right-click to save the diagram as a picture');
+  const applyMermaid = (root) => Promise.all([...root.querySelectorAll('.mermaid-block')].map(renderMermaidEl));
+  // Follow the app theme (View > Theme, or Windows when that is chosen)
+  darkQuery.addEventListener('change', () => { if (!mmForcedTheme) applyMermaid(preview); });
+  // Print / PDF: the paper is white, so diagrams are drawn in the light theme for it
+  async function withLightDiagrams(fn) {
+    if (!preview.querySelector('.mermaid-block') || mmTheme() === 'default') return fn();
+    mmForcedTheme = 'default';
+    await applyMermaid(preview);
+    try { return await fn(); } finally { mmForcedTheme = null; applyMermaid(preview); }
+  }
+  // (window.print() or a print started some other way: swap in light drawings already made)
+  window.addEventListener('beforeprint', () => {
+    if (mmForcedTheme) return;
+    preview.querySelectorAll('.mermaid-block').forEach((el) => {
+      const p = mmCache.get('default\n' + (mmGet(el).src || ''));
+      if (p && p.done && p.done.svg) { el.innerHTML = p.done.svg; el._mmShown = null; }
+    });
+  });
+  window.addEventListener('afterprint', () => { if (!mmForcedTheme) applyMermaid(preview); });
+
   // Turn rendered "> [!TYPE]" quotes into callout boxes
   function applyAlerts(root) {
     root.querySelectorAll('blockquote').forEach((bq) => {
@@ -147,6 +253,15 @@
       return node.getAttribute('data-fence') ? '\n\n```math\n' + tex + '\n```\n\n' : '\n\n$$\n' + tex + '\n$$\n\n';
     },
   });
+  // Diagrams go back as their fence. tidy() would touch blank lines etc. inside it, so a
+  // placeholder is written here and swapped for the real text after tidying (see syncFromRich).
+  let keptBlocks = [];
+  td.addRule('mermaid', {
+    filter: (node) => node.nodeName === 'DIV' && node.classList.contains('mermaid-block'),
+    replacement: (_c, node) => '\n\n\u0001PSMDKEEP' + (keptBlocks.push(mermaidMarkdown(node)) - 1) + '\u0001\n\n',
+  });
+  const putBackKept = (md) => md.replace(/^([ \t>]*)\u0001PSMDKEEP(\d+)\u0001/gm, (_m, ind, i) =>
+    ind + keptBlocks[+i].split('\n').join('\n' + ind).replace(new RegExp('\\n' + ind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\n|$)', 'g'), '\n' + ind.trimEnd()));
   // GFM strikethrough as ~~text~~ (the gfm plugin writes a single ~)
   td.addRule('strike', {
     filter: ['del', 's', 'strike'],
@@ -190,7 +305,10 @@
 
   function resolveImg(src) {
     if (!filePath || /^([a-z]+:|\/\/|#)/i.test(src)) return src;
-    return new URL(src, toFileUrl(dirname(filePath)) + '/').href;
+    const href = new URL(src, toFileUrl(dirname(filePath)) + '/').href;
+    // a picture changed on disk since it was first shown gets a new address, so it is read again
+    const v = imgVersion.get((urlToPath(href) || '').toLowerCase());
+    return v ? href.replace(/[?#].*$/, '') + '?v=' + v : href;
   }
 
   function updateStats() {
@@ -284,6 +402,7 @@
     }
     applyAlerts(preview);
     applyMath(preview);
+    applyMermaid(preview);
     preview.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || '';
       img.setAttribute('data-src', src);
@@ -422,7 +541,9 @@
     const copy = preview.cloneNode(true);
     copy.querySelectorAll('td br, th br').forEach((b) => b.remove()); // empty table cells hold a <br>
     copy.querySelectorAll('.front-matter').forEach((f) => f.remove()); // put back below, unchanged
-    let md = tidy(td.turndown(copy.innerHTML.replace(/\u200B/g, '')));
+    copy.querySelectorAll('.mermaid-block').forEach((d) => { d.textContent = 'diagram'; }); // (not empty: Turndown skips empty elements)
+    keptBlocks = [];
+    let md = putBackKept(tidy(td.turndown(copy.innerHTML.replace(/\u200B/g, ''))));
     if (md.trim()) md = md.replace(/\s+$/, '') + '\n'; else md = '';
     if (frontMatter) md = md ? frontMatter + md : frontMatter.replace(/\n+$/, '') + '\n';
     editor.value = md;
@@ -555,6 +676,7 @@
     box.innerHTML = DOMPurify.sanitize(marked.parse(text.replace(/\r\n?/g, '\n')));
     applyAlerts(box);
     applyMath(box);
+    applyMermaid(box);
     box.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || '';
       img.setAttribute('data-src', src);
@@ -592,7 +714,7 @@
       tailRange.setStart(rg.startContainer, rg.startOffset);
       tailRange.setEnd(block, block.childNodes.length);
       const tail = tailRange.extractContents();
-      const isEmpty = (el) => !el.textContent.replace(/[\u200B\u00A0\s]/g, '') && !el.querySelector('img, .math-inline, .math-block, input');
+      const isEmpty = (el) => !el.textContent.replace(/[\u200B\u00A0\s]/g, '') && !el.querySelector('img, .math-inline, .math-block, .mermaid-block, input');
       let anchor = block;
       blocks.forEach((b) => { anchor.after(b); anchor = b; });
       const tailBlock = block.cloneNode(false);
@@ -906,6 +1028,7 @@
     hr: { src: () => srcBlock('---'), rich: () => { exec('insertHorizontalRule'); paragraphAfterRule(); } },
     callout: { src: () => showCalloutMenu('src'), rich: () => showCalloutMenu('rich') },
     math: { src: () => insertMathSrc(), rich: () => insertMathRich() },
+    diagram: { src: () => insertDiagramSrc(), rich: () => insertDiagramRich() },
     undo: { src: () => { editor.focus(); document.execCommand('undo'); }, rich: () => exec('undo') },
   };
 
@@ -930,6 +1053,7 @@
     ['link', 'Link (Ctrl+K)', svg('<path d="M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1 1M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1-1"/>')],
     ['image', 'Image', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.600"/><path d="M4 18l5-5 4 4 3-3 4 4"/>')],
     ['math', 'Formula (maths, TeX). Double-click a formula to edit it', svg('<path d="M18 5H6l6 7-6 7h12"/>')],
+    ['diagram', 'Diagram (flowchart, sequence, Gantt, mind map...). Double-click a diagram to edit it', svg('<rect x="3" y="3" width="7" height="5" rx="1"/><rect x="14" y="16" width="7" height="5" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><path d="M10 5.5h4M6.5 8v10.5H14"/>')],
     ['codeblock', 'Code block', svg('<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/><path d="M4 3h3M17 3h3M4 21h3M17 21h3" opacity=".5"/>')],
     ['table', 'Table', svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M3 15h18M9 5v14M15 5v14"/>')],
     ['hr', 'Horizontal rule', svg('<path d="M4 12h16"/>')],
@@ -1412,7 +1536,7 @@
     const r = s.getRangeAt(0);
     if (!preview.contains(r.startContainer)) return null;
     const el = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-    if (el.closest('pre, code, .front-matter, .markdown-alert-title, td, th, .math-inline, .math-block')) return null;
+    if (el.closest('pre, code, .front-matter, .markdown-alert-title, td, th, .math-inline, .math-block, .mermaid-block')) return null;
     let block = el;
     while (block && block !== preview && !/^(P|DIV|H[1-6]|LI|BLOCKQUOTE)$/.test(block.tagName)) block = block.parentElement;
     if (!block || block === preview) return null;
@@ -1868,6 +1992,290 @@
     }
   }
 
+  // ---------- diagrams: the dialog ----------
+  // Mermaid text on the left, a live preview on the right, any error underneath.
+  // Resolves with the text (empty = remove the diagram), { drawio: true }, or null (cancelled).
+  const MM_TEMPLATES = [
+    ['Flowchart', 'flowchart TD\n    A[Start] --> B{Is it working?}\n    B -- Yes --> C[Great]\n    B -- No --> D[Fix it]\n    D --> B'],
+    ['Sequence diagram', 'sequenceDiagram\n    participant U as User\n    participant A as App\n    U->>A: Open file\n    A-->>U: Show the page\n    U->>A: Save\n    A-->>U: Saved'],
+    ['Class diagram', 'classDiagram\n    class Document {\n        +String path\n        +String text\n        +save()\n    }\n    class Tab {\n        +bool dirty\n        +activate()\n    }\n    Tab --> Document : shows'],
+    ['State diagram', 'stateDiagram-v2\n    [*] --> Draft\n    Draft --> Review : submit\n    Review --> Draft : changes needed\n    Review --> Published : approve\n    Published --> [*]'],
+    ['Entity relationship (ER)', 'erDiagram\n    CUSTOMER ||--o{ ORDER : places\n    ORDER ||--|{ LINE_ITEM : contains\n    PRODUCT ||--o{ LINE_ITEM : "is in"'],
+    ['Gantt chart', 'gantt\n    title Project plan\n    dateFormat YYYY-MM-DD\n    section Design\n    Sketches      :a1, 2026-01-05, 7d\n    Review        :after a1, 3d\n    section Build\n    First version :b1, 2026-01-15, 14d\n    Testing       :after b1, 7d'],
+    ['Mind map', 'mindmap\n  root((Project))\n    Goals\n      Faster\n      Simpler\n    People\n      Writers\n      Readers\n    Tools\n      Markdown\n      Diagrams'],
+    ['Pie chart', 'pie title Time spent\n    "Writing" : 50\n    "Editing" : 30\n    "Meetings" : 20'],
+  ];
+  const mmDlg = $('mm-dlg');
+  const mmSrc = $('mm-src');
+  const mmPrev = $('mm-preview');
+  const mmErr = $('mm-error');
+  const mmPick = $('mm-template');
+  mmPick.innerHTML = '<option value="">Choose a type of diagram…</option>' +
+    MM_TEMPLATES.map(([name], i) => `<option value="${i}">${esc(name)}</option>`).join('');
+  let mmPrevTimer = null;
+  let mmPrevSeq = 0;
+  async function mmPreviewNow() {
+    clearTimeout(mmPrevTimer);
+    const seq = ++mmPrevSeq;
+    const src = mmSrc.value;
+    if (!src.trim()) {
+      mmPrev.innerHTML = '<div class="mm-empty">Choose a type of diagram above, or type Mermaid text on the left.<br><br>Leave it empty and press OK to remove the diagram.</div>';
+      mmErr.textContent = '';
+      return;
+    }
+    const r = await mermaidSvg(src, mmTheme());
+    if (seq !== mmPrevSeq) return;
+    if (r.svg) { mmPrev.innerHTML = r.svg; mmPrev.classList.remove('stale'); mmErr.textContent = ''; }
+    else { mmPrev.classList.add('stale'); mmErr.textContent = r.error; } // keep the last good picture, dimmed
+  }
+  mmSrc.addEventListener('input', () => { clearTimeout(mmPrevTimer); mmPrevTimer = setTimeout(mmPreviewNow, 350); });
+  mmSrc.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) { e.preventDefault(); document.execCommand('insertText', false, '    '); }
+    if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); mmDlg.close('ok'); }
+  });
+  mmPick.addEventListener('change', () => {
+    const t = MM_TEMPLATES[+mmPick.value];
+    if (!t) return;
+    mmSrc.focus();
+    mmSrc.select();
+    document.execCommand('insertText', false, t[1]); // (so Ctrl+Z brings the old text back)
+    mmPick.value = '';
+    mmPreviewNow();
+  });
+  $('mm-help').addEventListener('click', () => window.api.openLink('https://mermaid.js.org/intro/syntax-reference.html'));
+  $('mm-cancel').addEventListener('click', () => mmDlg.close('cancel'));
+  $('mm-drawio').addEventListener('click', () => mmDlg.close('drawio'));
+  function diagramDialog(src, isNew) {
+    return new Promise((resolve) => {
+      mmSrc.value = src || '';
+      mmPrev.innerHTML = '';
+      mmPrev.classList.remove('stale');
+      mmErr.textContent = '';
+      $('mm-drawio').hidden = !isNew;
+      mmDlg.returnValue = '';
+      mmDlg.addEventListener('close', () => {
+        clearTimeout(mmPrevTimer);
+        mmPrevSeq++;
+        if (mmDlg.returnValue === 'ok') resolve(mmSrc.value.replace(/\s+$/, ''));
+        else if (mmDlg.returnValue === 'drawio') resolve({ drawio: true });
+        else resolve(null);
+      }, { once: true });
+      mmDlg.showModal();
+      mmPreviewNow();
+      if (src) { mmSrc.focus(); mmSrc.setSelectionRange(0, 0); mmSrc.scrollTop = 0; } else mmPick.focus();
+    });
+  }
+
+  // Double-click a diagram (Edit / Split) to change it; clear the text to remove it
+  async function editDiagramEl(el) {
+    const d = mmGet(el);
+    const r = await diagramDialog(d.src || '', false);
+    if (r == null || typeof r !== 'string') return;
+    if (!r.trim()) { el.remove(); scheduleRichSync(); return; }
+    if (r === d.src) return;
+    d.src = r;
+    mmSet(el, d);
+    renderMermaidEl(el);
+    scheduleRichSync();
+  }
+  preview.addEventListener('dblclick', (e) => {
+    const el = e.target.closest('.mermaid-block');
+    if (!el || !isEditable() || !preview.contains(el)) return;
+    e.preventDefault();
+    editDiagramEl(el);
+  });
+
+  // Toolbar, on the page: a new diagram below the current paragraph (in place of it if empty)
+  async function insertDiagramRich() {
+    const range = saveRange();
+    const r = await diagramDialog('', true);
+    restoreRange(range);
+    if (r && r.drawio) return newDrawio('rich', range);
+    if (!r || !r.trim()) return;
+    const box = document.createElement('div');
+    box.innerHTML = mmBlockHtml({ src: r });
+    const div = box.firstChild;
+    placeBlockAtCaret(div);
+    renderMermaidEl(div);
+  }
+  // Puts a new block on the page below the paragraph holding the caret (in place of it if it's
+  // empty), with the caret on the line after it
+  function placeBlockAtCaret(div) {
+    const s = window.getSelection();
+    const rg = s.rangeCount ? s.getRangeAt(0) : null;
+    let block = rg ? (rg.startContainer.nodeType === 1 ? rg.startContainer : rg.startContainer.parentElement) : null;
+    while (block && block !== preview && block.parentElement !== preview) block = block.parentElement;
+    if (!block || block === preview || !preview.contains(block)) block = null;
+    const emptyLine = block && block.tagName === 'P' && !block.textContent.replace(/[\u200B\u00A0\s]/g, '') && !block.querySelector('img');
+    if (emptyLine) block.replaceWith(div);
+    else if (block) block.after(div);
+    else preview.appendChild(div);
+    let p = div.nextElementSibling;
+    if (!p || p.tagName !== 'P') { p = document.createElement('p'); p.appendChild(document.createElement('br')); div.after(p); }
+    const c = document.createRange(); c.setStart(p, 0); c.collapse(true);
+    s.removeAllRanges(); s.addRange(c);
+    scheduleRichSync();
+  }
+
+  // Toolbar, in the Markdown pane: edits the ```mermaid fence holding the caret, or adds a new one
+  function mermaidFenceAt(v, pos) {
+    const lines = v.split('\n');
+    let at = 0, open = null;
+    for (let i = 0; i < lines.length; i++) {
+      const start = at, end = at + lines[i].length;
+      at = end + 1;
+      if (!open) {
+        const m = /^\s{0,3}(`{3,}|~{3,})\s*(\S*)/.exec(lines[i]);
+        if (m) open = { fence: m[1], lang: m[2].toLowerCase(), start, bodyStart: end + 1 };
+        continue;
+      }
+      if (new RegExp('^\\s{0,3}\\' + open.fence[0] + '{' + open.fence.length + ',}\\s*$').test(lines[i])) {
+        if (open.lang === 'mermaid' && pos >= open.start && pos <= end) {
+          return { bodyStart: Math.min(open.bodyStart, start), bodyEnd: Math.max(open.bodyStart, start - 1) };
+        }
+        open = null;
+      }
+    }
+    return null;
+  }
+  async function insertDiagramSrc() {
+    const s0 = editor.selectionStart, e0 = editor.selectionEnd;
+    const f = mermaidFenceAt(editor.value, s0);
+    const old = f ? editor.value.slice(f.bodyStart, f.bodyEnd) : '';
+    const r = await diagramDialog(old, !f);
+    editor.focus();
+    if (r && r.drawio) { editor.setSelectionRange(s0, e0); return newDrawio('src'); }
+    if (r == null) { editor.setSelectionRange(s0, e0); return; }
+    if (f) {
+      if (r === old) return;
+      if (!r.trim()) { // remove the whole fence
+        const v = editor.value;
+        const ls = v.lastIndexOf('\n', f.bodyStart - 2) + 1;
+        let le = v.indexOf('\n', f.bodyEnd + 1); le = le < 0 ? v.length : le + 1;
+        if (v[le] === '\n' && (ls === 0 || v[ls - 2] === '\n')) le++; // and one of the blank lines around it
+        editor.setSelectionRange(ls, le);
+        srcInsert('');
+        return;
+      }
+      editor.setSelectionRange(f.bodyStart, f.bodyEnd);
+      srcInsert(old ? r : r + '\n');
+      return;
+    }
+    if (!r.trim()) return;
+    // on a line of its own, with a blank line before and after
+    const v = editor.value;
+    let at = v.indexOf('\n', e0); if (at < 0) at = v.length;
+    if (!v.slice(v.lastIndexOf('\n', e0 - 1) + 1, at).trim()) at = v.lastIndexOf('\n', e0 - 1) + 1; // an empty line: use it
+    const before = v.slice(0, at);
+    const pre = !before ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+    const post = v.slice(at).startsWith('\n') || at === v.length ? '\n' : '\n\n';
+    editor.setSelectionRange(at, at);
+    srcInsert(pre + '```mermaid\n' + r + '\n```' + post);
+  }
+
+  // ---------- diagrams: save as a picture ----------
+  // Saved in the light theme (it suits documents and e-mails); PNG at twice the size, on white.
+  async function diagramPicture(el, ext) {
+    const r = await mermaidSvg(mmGet(el).src || '', 'default');
+    if (!r.svg) { $('saved').textContent = 'This diagram has an error, so it cannot be saved as a picture'; return; }
+    const svgEl = new DOMParser().parseFromString(r.svg, 'image/svg+xml').documentElement;
+    // the size it is drawn at, so the file opens at that size (Mermaid leaves width="100%")
+    const live = el.querySelector('svg');
+    const vb = (svgEl.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    let w = vb[2] || (live && live.getBoundingClientRect().width) || 800;
+    let h = vb[3] || (live && live.getBoundingClientRect().height) || 600;
+    svgEl.setAttribute('width', Math.ceil(w));
+    svgEl.setAttribute('height', Math.ceil(h));
+    svgEl.style.removeProperty('max-width');
+    const text = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(svgEl);
+    let data;
+    if (ext === 'svg') data = new TextEncoder().encode(text);
+    else {
+      const scale = 2;
+      const img = new Image();
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
+      try { await img.decode(); } catch (_) { $('saved').textContent = 'Could not make a PNG of this diagram'; return; }
+      const cv = document.createElement('canvas');
+      cv.width = Math.ceil(w * scale); cv.height = Math.ceil(h * scale);
+      const g = cv.getContext('2d');
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, cv.width, cv.height);
+      g.drawImage(img, 0, 0, cv.width, cv.height);
+      let blob;
+      try { blob = await new Promise((res) => cv.toBlob(res, 'image/png')); } catch (_) { blob = null; }
+      if (!blob) { $('saved').textContent = 'Could not make a PNG of this diagram'; return; }
+      data = new Uint8Array(await blob.arrayBuffer());
+    }
+    const saved = await window.api.saveDiagram(filePath, data, ext);
+    if (saved) $('saved').textContent = 'Saved ' + basename(saved);
+  }
+
+  // ---------- draw.io drawings ----------
+  // draw.io (diagrams.net) can save a drawing as foo.drawio.svg / foo.drawio.png: an ordinary
+  // picture with the drawing kept inside, so it shows here like any image. If the draw.io desktop
+  // app is installed it can be opened from here to edit it; the picture refreshes when saved.
+  const isDrawio = (src) => /\.drawio\.(svg|png)$/i.test((src || '').split(/[?#]/)[0]);
+  const urlToPath = (href) => {
+    try {
+      const u = new URL(href);
+      return u.protocol === 'file:' ? decodeURIComponent(u.pathname.replace(/^\/([A-Za-z]:)/, '$1')).replace(/\//g, '\\') : null;
+    } catch (_) { return null; }
+  };
+  const imgPath = (img) => urlToPath(img.src);
+  async function newDrawio(where, range) {
+    if (!(await ensureSavedForImages())) return;
+    const rel = await window.api.newDrawio(filePath);
+    if (!rel) return;
+    if (where === 'src') srcBlock(`![](${rel})`);
+    else {
+      if (range && preview.contains(range.startContainer)) restoreRange(range);
+      else preview.focus();
+      const p = document.createElement('p');
+      p.innerHTML = `<img src="${esc(resolveImg(rel))}" data-src="${esc(rel)}" alt="">`;
+      placeBlockAtCaret(p);
+    }
+    window.api.editDrawio(dirname(filePath) + '\\' + rel.replace(/\//g, '\\'));
+  }
+  // Pictures changed on disk (e.g. saved from draw.io) are reloaded when the window gets focus
+  const imgVersion = new Map(); // full path (lower case) -> number added to the address to reload it
+  async function refreshImages() {
+    const imgs = [...preview.querySelectorAll('img')].map((img) => [img, imgPath(img)]).filter(([, p]) => p);
+    if (!imgs.length) return;
+    const times = await window.api.fileTimes(imgs.map(([, p]) => p));
+    imgs.forEach(([img, p], i) => {
+      const t = times[i];
+      if (t == null) return;
+      if (img._mtime != null && img._mtime !== t) {
+        const v = (imgVersion.get(p.toLowerCase()) || 0) + 1;
+        imgVersion.set(p.toLowerCase(), v);
+        img.src = resolveImg(img.getAttribute('data-src') || '');
+      }
+      img._mtime = t;
+    });
+  }
+  window.addEventListener('focus', refreshImages);
+
+  // Right-click a diagram or a draw.io picture
+  preview.addEventListener('contextmenu', async (e) => {
+    const mm = e.target.closest('.mermaid-block');
+    const img = !mm && e.target.closest('img');
+    if (!(mm && preview.contains(mm)) && !(img && isDrawio(img.getAttribute('data-src')))) return;
+    e.preventDefault();
+    if (mm) {
+      const ok = !!mm.querySelector('svg');
+      const items = [];
+      if (isEditable()) items.push({ id: 'edit', label: 'Edit diagram…' }, { type: 'separator' });
+      items.push({ id: 'svg', label: 'Save as SVG…', enabled: ok }, { id: 'png', label: 'Save as PNG…', enabled: ok });
+      const c = await window.api.contextMenu(items);
+      if (c === 'edit') editDiagramEl(mm);
+      else if (c === 'svg' || c === 'png') diagramPicture(mm, c);
+      return;
+    }
+    const p = imgPath(img);
+    const c = await window.api.contextMenu([{ id: 'drawio', label: 'Edit in draw.io', enabled: !!p }]);
+    if (c === 'drawio' && p) window.api.editDrawio(p);
+  });
+
   // ---------- modes / files ----------
   function setMode(m) {
     if (mode !== 'read') syncFromRich();
@@ -1876,6 +2284,7 @@
     document.body.classList.add('mode-' + m);
     preview.contentEditable = m === 'read' ? 'false' : 'true';
     applyCheckboxState();
+    preview.querySelectorAll('.mermaid-block').forEach((el) => { el.title = mmTitle(); });
     if (m !== 'read' && !preview.firstChild) preview.innerHTML = '<p><br></p>';
     if (m === 'edit') { lastTarget = 'rich'; preview.focus(); }
     if (m === 'split') editor.focus();
@@ -2109,7 +2518,7 @@
   function pageText() {
     const BLOCK = /^(P|LI|H[1-6]|PRE|TD|TH|BLOCKQUOTE|DIV|UL|OL|TABLE|TR)$/;
     const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title, .front-matter, .math-inline, .math-block') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      acceptNode: (n) => (n.parentElement.closest('.markdown-alert-title, .front-matter, .math-inline, .math-block, .mermaid-block') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     const parts = [];
     let text = '';
@@ -2310,8 +2719,8 @@
       case 'mode-read': return setMode('read');
       case 'mode-edit': return setMode('edit');
       case 'mode-split': return setMode('split');
-      case 'export-pdf': syncFromRich(); return window.api.exportPdf(filePath);
-      case 'print': return window.api.print();
+      case 'export-pdf': syncFromRich(); return withLightDiagrams(() => window.api.exportPdf(filePath));
+      case 'print': return withLightDiagrams(() => window.api.print());
       case 'toggle-sidebar': return setSidebar(!sidebarOpen());
       case 'autosave-on': autoSave = true; autosaveAll(); return;
       case 'autosave-off': autoSave = false; return;

@@ -653,7 +653,98 @@ ipcMain.handle('export-pdf', async (e, filePath) => {
   return true;
 });
 
-ipcMain.on('print', (e) => e.sender.print({ printBackground: true }));
+// Resolves when printing is done or cancelled (the page redraws diagrams in the light theme for it)
+ipcMain.handle('print', (e) => new Promise((resolve) => e.sender.print({ printBackground: true }, () => resolve())));
+
+// A small native menu at the mouse (right-click a diagram / draw.io picture). Resolves with the id clicked, or null.
+ipcMain.handle('context-menu', (e, items) => new Promise((resolve) => {
+  let done = false;
+  const menu = Menu.buildFromTemplate((items || []).map((it) => (it.type === 'separator' ? { type: 'separator' } : {
+    label: String(it.label), enabled: it.enabled !== false, click: () => { done = true; resolve(it.id); },
+  })));
+  menu.popup({ window: winOf(e), callback: () => setTimeout(() => { if (!done) resolve(null); }, 50) });
+}));
+
+// Right-click a diagram > Save as SVG / PNG
+ipcMain.handle('save-diagram', async (e, { docPath, data, ext }) => {
+  if (!['svg', 'png'].includes(ext)) return null;
+  const dir = docPath && path.isAbsolute(docPath) ? path.dirname(docPath) : app.getPath('documents');
+  const r = await dialog.showSaveDialog(winOf(e), {
+    defaultPath: path.join(dir, 'diagram.' + ext),
+    filters: [ext === 'svg' ? { name: 'SVG picture', extensions: ['svg'] } : { name: 'PNG picture', extensions: ['png'] }],
+  });
+  if (r.canceled || !r.filePath) return null;
+  try { fs.writeFileSync(r.filePath, Buffer.from(data)); return r.filePath; } catch (err) {
+    dialog.showErrorBox('Cannot save the picture', err.message);
+    return null;
+  }
+});
+
+// When pictures on the page last changed on disk (so ones edited in another program are reloaded)
+ipcMain.handle('file-times', (_e, paths) => (Array.isArray(paths) ? paths.slice(0, 500) : []).map((p) => {
+  try { return fs.statSync(String(p)).mtimeMs; } catch (_) { return null; }
+}));
+
+// ---- draw.io ----
+// Drawings saved by draw.io as .drawio.svg / .drawio.png are ordinary pictures with the drawing kept
+// inside. If the draw.io desktop app is installed, PageSmithMD can open one in it to edit.
+const DRAWIO_URL = 'https://github.com/jgraph/drawio-desktop/releases/latest';
+function findDrawio() {
+  const env = process.env;
+  const places = [
+    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Programs', 'draw.io', 'draw.io.exe'),
+    env.ProgramFiles && path.join(env.ProgramFiles, 'draw.io', 'draw.io.exe'),
+    env['ProgramFiles(x86)'] && path.join(env['ProgramFiles(x86)'], 'draw.io', 'draw.io.exe'),
+    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'draw.io.exe'), // Microsoft Store
+  ].filter(Boolean);
+  return places.find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } }) || null;
+}
+ipcMain.on('edit-drawio', async (e, file) => {
+  const win = winOf(e);
+  const target = path.resolve(String(file || ''));
+  if (!/\.drawio\.(svg|png)$/i.test(target) || !fs.existsSync(target)) return;
+  const exe = findDrawio();
+  if (exe) {
+    try {
+      require('child_process').spawn(exe, [target], { detached: true, stdio: 'ignore' }).unref();
+      return;
+    } catch (_) { /* fall through to the message */ }
+  }
+  const r = await dialog.showMessageBox(win, {
+    type: 'info',
+    title: 'PageSmithMD',
+    message: 'The draw.io app is needed to edit this drawing.',
+    detail: 'draw.io is a free diagram app. Once it is installed, right-click the picture and choose ' +
+      '"Edit in draw.io" again; when you save in draw.io the picture here updates.\n\n' + target,
+    buttons: ['Get draw.io', 'Show in folder', 'Close'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  });
+  if (r.response === 0) shell.openExternal(DRAWIO_URL);
+  else if (r.response === 1) shell.showItemInFolder(target);
+});
+// An empty drawing in the document's images folder; returns its path for the Markdown
+const EMPTY_DRAWIO = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" ' +
+  'width="241px" height="61px" viewBox="-0.5 -0.5 241 61" content="' +
+  '&lt;mxfile&gt;&lt;diagram id=&quot;page1&quot; name=&quot;Page-1&quot;&gt;&lt;mxGraphModel&gt;&lt;root&gt;' +
+  '&lt;mxCell id=&quot;0&quot;/&gt;&lt;mxCell id=&quot;1&quot; parent=&quot;0&quot;/&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;&lt;/diagram&gt;&lt;/mxfile&gt;">' +
+  '<defs/><g><rect x="0" y="0" width="240" height="60" rx="6" fill="#ffffff" stroke="#999999" stroke-dasharray="4 3"/>' +
+  '<text x="120" y="35" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" fill="#666666">New draw.io drawing</text></g></svg>\n';
+ipcMain.handle('new-drawio', (_e, docPath) => {
+  try {
+    if (!docPath || !path.isAbsolute(docPath)) return null;
+    const dir = path.join(path.dirname(docPath), 'images');
+    fs.mkdirSync(dir, { recursive: true });
+    let name = 'drawing.drawio.svg';
+    for (let i = 2; fs.existsSync(path.join(dir, name)); i++) name = `drawing-${i}.drawio.svg`;
+    fs.writeFileSync(path.join(dir, name), EMPTY_DRAWIO);
+    return 'images/' + name;
+  } catch (err) {
+    dialog.showErrorBox('Cannot make the drawing', err.message);
+    return null;
+  }
+});
 
 // Pasted or dropped images are stored in an "images" folder next to the document.
 // Returns the path to use in the Markdown (relative, forward slashes), or null.

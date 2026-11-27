@@ -2317,20 +2317,46 @@
     if (!(mm && preview.contains(mm)) && !img) return;
     e.preventDefault(); // (before the await below, or the page's own menu would open)
     const drawio = img && (await drawioAt(img));
-    if (img && !drawio) return;
+    if (img && !drawio && !isEditable()) return;
     if (mm) {
       const ok = !!mm.querySelector('svg');
       const items = [];
       if (isEditable()) items.push({ id: 'edit', label: 'Edit diagram…' }, { type: 'separator' });
       items.push({ id: 'svg', label: 'Save as SVG…', enabled: ok }, { id: 'png', label: 'Save as PNG…', enabled: ok });
+      if (isEditable()) items.push({ type: 'separator' }, { id: 'delete', label: 'Delete diagram' });
       const c = await window.api.contextMenu(items);
       if (c === 'edit') editDiagramEl(mm);
       else if (c === 'svg' || c === 'png') diagramPicture(mm, c);
+      else if (c === 'delete') deleteFromPage(mm);
       return;
     }
-    const c = await window.api.contextMenu([{ id: 'drawio', label: 'Edit in draw.io' }]);
+    const items = [];
+    if (drawio) items.push({ id: 'drawio', label: 'Edit in draw.io' });
+    if (drawio && isEditable()) items.push({ type: 'separator' });
+    if (isEditable()) items.push({ id: 'delete', label: drawio ? 'Delete drawing' : 'Delete picture' });
+    const c = await window.api.contextMenu(items);
     if (c === 'drawio') editDrawio(drawio);
+    else if (c === 'delete') deleteFromPage(img);
   });
+  // Removes a diagram or picture from the document (its file stays in the images folder).
+  // Done as an editing step so Ctrl+Z brings it back.
+  function deleteFromPage(el) {
+    if (!preview.contains(el)) return;
+    // a picture alone in its paragraph takes the paragraph with it
+    const holder = el.parentElement;
+    const alone = holder && holder !== preview && holder.tagName === 'P' &&
+      !holder.textContent.replace(/[​ \s]/g, '') && holder.querySelectorAll('img').length === 1;
+    const target = alone && (holder.previousElementSibling || holder.nextElementSibling) ? holder : el;
+    const s = window.getSelection();
+    const r = document.createRange();
+    r.selectNode(target);
+    s.removeAllRanges(); s.addRange(r);
+    preview.focus();
+    // (inserting nothing, rather than 'delete', which joins the paragraphs either side of a diagram)
+    document.execCommand('insertHTML', false, '');
+    if (preview.contains(el)) el.remove();
+    scheduleRichSync();
+  }
 
   // ---------- modes / files ----------
   function setMode(m) {

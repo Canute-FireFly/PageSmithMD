@@ -16,6 +16,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - draw.io drawings (`.drawio.svg` / `.drawio.png`, or an SVG/PNG saved from draw.io) show like any
   picture. Double-click or right-click one to edit it in the draw.io desktop app (if installed); it
   updates here when saved there. The Diagram dialog can make a new drawing or insert one you have.
+- Right-click a diagram, drawing or picture (Edit or Split view) to delete it; Ctrl+Z brings it back.
   Pictures changed on disk are reloaded when you come back to PageSmithMD.
 
 ## [0.9.0] - first public beta
